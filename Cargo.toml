@@ -1,0 +1,12 @@
+[package]
+name = "serri"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+indexmap = { version = "2.3.0", features = ["serde"] }
+serde = { version = "1.0.207", features = ["derive"] }
+serialport = "4.5.0"
+thiserror = "1.0.63"
+toml = "0.8.19"

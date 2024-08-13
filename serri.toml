@@ -1,0 +1,10 @@
+ports."01. Short" = "/dev/ttyUSB0:115200"
+
+[ports."02. Description"]
+description = "Test 1"
+connection = "/dev/ttyUSB0:115200:8N1"
+
+[ports."03. Long"]
+description = "Long test"
+device = "/dev/ttyUBS0"
+baud_rate = 115200
