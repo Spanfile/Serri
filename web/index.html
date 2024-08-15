@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="/dist/index.css" rel="stylesheet">
+    <title>Serri</title>
+</head>
+<body>
+<div class="container">
+    <header class="d-flex justify-content-lg-start py-3 bg-body-secondary">
+        <ul class="nav nav-pills">
+            <li class="nav-item"><a href="/" class="nav-link active">Home</a></li>
+        </ul>
+    </header>
+
+    <div class="row">
+        <div class="col-lg-2 d-flex flex-column align-items-stretch flex-shrink-0">
+            <div class="list-group list-group-flush border-bottom scrollarea">
+                {% for port in config.serial_port %}
+                <a class="list-group-item list-group-item-action py-3 lh-sm"
+                   href="/device/{{ loop.index0 }}">
+                    <div class="d-flex w-100 align-items-center justify-content-between">
+                        <strong class="mb-1">
+                            {% if let Some(title) = port.title %}
+                            {{ title }}
+                            {% else %}
+                            {{ port.serial_device.device }}
+                            {% endif %}
+                        </strong>
+                    </div>
+                    {% if let Some(description) = port.description %}
+                    <div class="pb-1 small text-truncate overflow-auto">{{ description }}</div>
+                    {% else if port.title.is_some() %}
+                    <div class="pb-1 small text-truncate overflow-auto">{{ port.serial_device.device
+                        }}
+                    </div>
+                    {% endif %}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% block device %}{% endblock %}
+    </div>
+</div>
+<script src="/dist/index.js"></script>
+</body>
+</html>

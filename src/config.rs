@@ -1,27 +1,30 @@
-use std::{fmt, fmt::Formatter, num::ParseIntError, str::FromStr};
-use indexmap::IndexMap;
+use std::{fmt, fmt::Formatter, net::SocketAddr, num::ParseIntError, str::FromStr, time::Duration};
+
 use serde::{
     de::{Error, Unexpected, Visitor},
     Deserialize, Deserializer,
 };
-use serialport::{DataBits, FlowControl, Parity, StopBits};
+use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits, TTYPort};
 use thiserror::Error;
 
 use crate::util::MaybeSplitOnce;
 
 #[derive(Debug, Deserialize)]
 pub struct SerriConfig {
-    pub ports: IndexMap<String, PortConfig>,
+    pub listen: SocketAddr,
+    pub serial_port: Vec<SerialPortConfig>,
 }
 
-#[derive(Debug)]
-pub struct PortConfig {
+#[derive(Debug, Deserialize)]
+pub struct SerialPortConfig {
+    pub title: Option<String>,
     pub description: Option<String>,
-    pub connection: ConnectionInfo,
+    #[serde(flatten)]
+    pub serial_device: SerialDevice,
 }
 
 #[derive(Debug)]
-pub struct ConnectionInfo {
+pub struct SerialDevice {
     pub device: String,
     pub baud_rate: u32,
     pub serial_params: SerialParams,
@@ -52,8 +55,8 @@ pub struct SerialParams {
 }
 
 #[derive(Debug, Error)]
-pub enum ConnectionParseError {
-    #[error("malformed connection string: {0}")]
+pub enum SerialDeviceParseError {
+    #[error("malformed device string: {0}")]
     MalformedConnectionString(String),
     #[error("invalid baud rate: {0}")]
     InvalidBaudRate(String),
@@ -62,6 +65,25 @@ pub enum ConnectionParseError {
 
     #[error("invalid integer value: {0}")]
     InvalidInteger(#[from] ParseIntError),
+}
+
+impl SerialDevice {
+    pub fn open(&self) -> anyhow::Result<TTYPort> {
+        let mut port = serialport::new(&self.device, self.baud_rate)
+            .data_bits(self.serial_params.data_bits)
+            .parity(self.serial_params.parity)
+            .stop_bits(self.serial_params.stop_bits)
+            .flow_control(self.serial_params.flow_control)
+            .open_native()?;
+
+        port.set_timeout(Duration::from_secs(1))
+            .expect("failed to set serial port timeout");
+
+        port.set_exclusive(true)
+            .expect("failed to set serial port exclusive");
+
+        Ok(port)
+    }
 }
 
 impl Default for SerialParams {
@@ -75,12 +97,12 @@ impl Default for SerialParams {
     }
 }
 
-impl FromStr for ConnectionInfo {
-    type Err = ConnectionParseError;
+impl FromStr for SerialDevice {
+    type Err = SerialDeviceParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some((device, rest)) = s.split_once(':') else {
-            return Err(ConnectionParseError::MalformedConnectionString(
+            return Err(SerialDeviceParseError::MalformedConnectionString(
                 s.to_string(),
             ));
         };
@@ -88,17 +110,17 @@ impl FromStr for ConnectionInfo {
         let (baud_str, params_str) = rest.maybe_split_once(':');
         let baud_rate: u32 = baud_str
             .parse()
-            .map_err(|_| ConnectionParseError::InvalidBaudRate(baud_str.to_string()))?;
+            .map_err(|_| SerialDeviceParseError::InvalidBaudRate(baud_str.to_string()))?;
 
         let serial_params = if let Some(params_str) = params_str {
             let Some((data_char, parity_and_stop)) = params_str.split_at_checked(1) else {
-                return Err(ConnectionParseError::InvalidParameters(
+                return Err(SerialDeviceParseError::InvalidParameters(
                     params_str.to_string(),
                 ));
             };
 
             let Some((parity_char, stop_char)) = parity_and_stop.split_at_checked(1) else {
-                return Err(ConnectionParseError::InvalidParameters(
+                return Err(SerialDeviceParseError::InvalidParameters(
                     params_str.to_string(),
                 ));
             };
@@ -108,15 +130,15 @@ impl FromStr for ConnectionInfo {
             let data_bits = data_char
                 .parse::<u8>()?
                 .try_into()
-                .map_err(|_| ConnectionParseError::MalformedConnectionString(s.to_string()))?;
+                .map_err(|_| SerialDeviceParseError::MalformedConnectionString(s.to_string()))?;
 
             let parity = parse_parity_str(parity_char)
-                .map_err(|_| ConnectionParseError::MalformedConnectionString(s.to_string()))?;
+                .map_err(|_| SerialDeviceParseError::MalformedConnectionString(s.to_string()))?;
 
             let stop_bits = stop_char
                 .parse::<u8>()?
                 .try_into()
-                .map_err(|_| ConnectionParseError::MalformedConnectionString(s.to_string()))?;
+                .map_err(|_| SerialDeviceParseError::MalformedConnectionString(s.to_string()))?;
 
             SerialParams {
                 data_bits,
@@ -128,7 +150,7 @@ impl FromStr for ConnectionInfo {
             SerialParams::default()
         };
 
-        Ok(ConnectionInfo {
+        Ok(SerialDevice {
             device: device.to_string(),
             baud_rate,
             serial_params,
@@ -136,78 +158,35 @@ impl FromStr for ConnectionInfo {
     }
 }
 
-impl FromStr for PortConfig {
-    type Err = ConnectionParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(PortConfig {
-            description: None,
-            connection: s.parse()?,
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for PortConfig {
+impl<'de> Deserialize<'de> for SerialDevice {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum PortConfigEnum {
-            #[serde(with = "ThisPortConfig")]
-            PortConfig(PortConfig),
-            ConnectionString(String),
-        }
-
-        #[derive(Deserialize)]
-        #[serde(remote = "PortConfig")]
-        struct ThisPortConfig {
-            #[serde(default)]
-            description: Option<String>,
-            #[serde(flatten)]
-            connection: ConnectionInfo,
-        }
-
-        match PortConfigEnum::deserialize(deserializer)? {
-            PortConfigEnum::PortConfig(port_config) => Ok(port_config),
-            PortConfigEnum::ConnectionString(conn) => {
-                let port_config = PortConfig::from_str(&conn).map_err(Error::custom)?;
-                Ok(port_config)
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ConnectionInfo {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum ConnectionInfoEnum {
-            #[serde(with = "ThisConnectionInfo")]
-            ConnectionObject(ConnectionInfo),
-            ConnectionString {
-                connection: String,
+        enum SerialDeviceEnum {
+            #[serde(with = "ThisSerialDevice")]
+            DeviceObject(SerialDevice),
+            DeviceString {
+                device: String,
             },
         }
 
         #[derive(Deserialize)]
-        #[serde(remote = "ConnectionInfo")]
-        struct ThisConnectionInfo {
+        #[serde(remote = "SerialDevice")]
+        struct ThisSerialDevice {
             device: String,
             baud_rate: u32,
             #[serde(flatten, default)]
             serial_params: SerialParams,
         }
 
-        match ConnectionInfoEnum::deserialize(deserializer)? {
-            ConnectionInfoEnum::ConnectionObject(conn) => Ok(conn),
-            ConnectionInfoEnum::ConnectionString { connection } => {
-                let conn_info = ConnectionInfo::from_str(&connection).map_err(Error::custom)?;
-                Ok(conn_info)
+        match SerialDeviceEnum::deserialize(deserializer)? {
+            SerialDeviceEnum::DeviceObject(device) => Ok(device),
+            SerialDeviceEnum::DeviceString { device: device_str } => {
+                let device = SerialDevice::from_str(&device_str).map_err(Error::custom)?;
+                Ok(device)
             }
         }
     }
