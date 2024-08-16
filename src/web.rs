@@ -16,6 +16,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serialport::TTYPort;
+use tokio_util::sync::CancellationToken;
 use tower_http::services::ServeDir;
 
 use crate::{
@@ -81,19 +82,30 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
         .try_clone_native()
         .expect("failed to clone serial port");
 
+    let cancel_token = CancellationToken::new();
+    let read_cancel_token = cancel_token.clone();
     let (read_tx, mut read_rx) = tokio::sync::mpsc::channel(32);
 
     let reader_task = tokio::task::spawn_blocking(move || loop {
         let mut buf = [0u8; 1024];
-
         match reader.read(&mut buf) {
-            Ok(amt) => read_tx
-                .blocking_send(buf[..amt].to_vec())
-                .expect("failed to send read buf"),
+            // TODO: figure out how to read everything even if the buffer fills up
+            Ok(amt) => {
+                println!("Read {amt} bytes from serial");
+                read_tx
+                    .blocking_send(buf[..amt].to_vec())
+                    .expect("failed to notify read buf");
+            }
+
             Err(e) => match e.kind() {
                 ErrorKind::TimedOut => (),
                 _ => println!("failed to read from serial port: {e:?}"),
             },
+        }
+
+        if read_cancel_token.is_cancelled() {
+            println!("Reader cancelled");
+            break;
         }
     });
 
@@ -101,7 +113,7 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
         tokio::select! {
             ws_msg = ws_rx.next() => {
                 if let Some(Ok(msg)) = ws_msg {
-                    // println!("{msg:?}");
+                    println!("{msg:?}");
 
                     if let Message::Text(text) = msg {
                         let buf = text.as_bytes();
@@ -122,7 +134,7 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
                         break;
                     }
                 } else {
-                    println!("Read task channel closed");
+                    println!("Reader task channel closed");
                     break;
                 }
             }
@@ -130,4 +142,9 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
     }
 
     println!("WS closing");
+
+    cancel_token.cancel();
+    if let Err(e) = reader_task.await {
+        println!("Reader task failed: {e:?}");
+    }
 }

@@ -4,7 +4,7 @@ use serde::{
     de::{Error, Unexpected, Visitor},
     Deserialize, Deserializer,
 };
-use serialport::{DataBits, FlowControl, Parity, SerialPort, SerialPortBuilder, StopBits, TTYPort};
+use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits, TTYPort};
 use thiserror::Error;
 
 use crate::util::MaybeSplitOnce;
@@ -76,7 +76,7 @@ impl SerialDevice {
             .flow_control(self.serial_params.flow_control)
             .open_native()?;
 
-        port.set_timeout(Duration::from_secs(1))
+        port.set_timeout(Duration::from_millis(200))
             .expect("failed to set serial port timeout");
 
         port.set_exclusive(true)

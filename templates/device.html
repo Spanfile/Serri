@@ -1,11 +1,11 @@
 {% extends "index.html" %}
 {% block device %}
 {% let port = config.serial_port[device_index] %}
-<div class="col-lg-7 p-3">
-    <div id="terminal" style="width:720px"></div>
+<div class="col-lg p-3 justify-content-center">
+    <div class="d-inline-block" id="terminal"></div>
 </div>
 
-<div class="col-lg-3 p-3">
+<div class="col-lg p-3">
     <table class="table">
         <tbody>
         <tr>
@@ -55,10 +55,27 @@
         Automatically resize terminal to fit screen.
     </div>
 
+    <label class="form-label">Terminal size</label>
+    <div class="row g-3 align-items-center">
+        <div class="col">
+            <label class="visually-hidden" for="numTerminalColumns">Columns</label>
+            <input type="number" class="form-control" id="numTerminalColumns" placeholder="80">
+        </div>
+
+        <div class="col">
+            <label class="visually-hidden" for="numTerminalRows">Rows</label>
+            <input type="number" class="form-control" id="numTerminalRows" placeholder="24">
+        </div>
+
+        <div class="col-auto">
+            <button class="btn btn-primary" type="button" id="btnApplyTerminalSize">Apply</button>
+        </div>
+    </div>
+
     <hr>
     <button class="btn btn-primary" type="button">Pop-out</button>
 </div>
 
 <link href="/dist/device.css" rel="stylesheet">
-<script src="/dist/device.js"></script>
+<script src="/dist/device.js" type="module"></script>
 {% endblock %}

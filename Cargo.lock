@@ -864,6 +864,7 @@ dependencies = [
  "serialport",
  "thiserror",
  "tokio",
+ "tokio-util",
  "toml",
  "tower-http",
 ]
