@@ -1,15 +1,5 @@
-pub trait MaybeSplitOnce {
-    fn maybe_split_once(&self, split: char) -> (&str, Option<&str>);
-}
+mod maybe_split_once;
+mod read_up_to;
 
-impl MaybeSplitOnce for str {
-    fn maybe_split_once(&self, split: char) -> (&str, Option<&str>) {
-        let mut split = self.splitn(2, split);
-
-        // splitn(2) returns at most two items, always returning at least one (the entire input)
-        let left = split.next().unwrap();
-        let right = split.next();
-
-        (left, right)
-    }
-}
+pub use maybe_split_once::MaybeSplitOnce;
+pub use read_up_to::ReadUpTo;

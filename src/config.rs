@@ -12,6 +12,7 @@ use crate::util::MaybeSplitOnce;
 #[derive(Debug, Deserialize)]
 pub struct SerriConfig {
     pub listen: SocketAddr,
+    pub banner: Option<String>,
     pub serial_port: Vec<SerialPortConfig>,
 }
 
@@ -76,7 +77,7 @@ impl SerialDevice {
             .flow_control(self.serial_params.flow_control)
             .open_native()?;
 
-        port.set_timeout(Duration::from_millis(200))
+        port.set_timeout(Duration::from_millis(20))
             .expect("failed to set serial port timeout");
 
         port.set_exclusive(true)

@@ -4,7 +4,7 @@
     "templates/device.js"
   ],
   "scripts": {
-    "watch": "parcel watch",
+    "watch": "parcel watch --no-hmr",
     "build": "parcel build"
   },
   "dependencies": {

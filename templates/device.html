@@ -1,12 +1,14 @@
 {% extends "index.html" %}
 {% block device %}
-{% let port = config.serial_port[device_index] %}
 <div class="col-lg p-3 justify-content-center">
+    <div id="wsAlertPlaceholder"></div>
     <div class="d-inline-block" id="terminal"></div>
 </div>
 
 <div class="col-lg p-3">
     <table class="table">
+        {% let port = config.serial_port[active_device_index.expect("active device not set for
+        device template")] %}
         <tbody>
         <tr>
             <th scope="row" class="text-nowrap">Device</th>
@@ -61,7 +63,7 @@
             <label class="visually-hidden" for="numTerminalColumns">Columns</label>
             <input type="number" class="form-control" id="numTerminalColumns" placeholder="80">
         </div>
-
+        <div class="col-auto">by</div>
         <div class="col">
             <label class="visually-hidden" for="numTerminalRows">Rows</label>
             <input type="number" class="form-control" id="numTerminalRows" placeholder="24">
@@ -77,5 +79,15 @@
 </div>
 
 <link href="/dist/device.css" rel="stylesheet">
+
+<script>
+  const alertPlaceholder = document.getElementById('wsAlertPlaceholder')
+  const appendWsAlert = (message) => {
+    const alert = document.createElement('div')
+    alert.innerHTML = `{% include "alert.html" %}`
+
+    alertPlaceholder.append(alert)
+  }
+</script>
 <script src="/dist/device.js" type="module"></script>
 {% endblock %}

@@ -1,4 +1,5 @@
 listen = "127.0.0.1:8080"
+banner = "Connected to %d"
 
 [[serial_port]]
 device = "/dev/ttyUSB0:115200"

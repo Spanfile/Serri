@@ -8,13 +8,14 @@ use crate::config::SerriConfig;
 #[template(path = "index.html")]
 pub struct IndexTemplate {
     pub config: Arc<SerriConfig>,
+    pub active_device_index: Option<usize>,
+    pub active_path: String,
 }
 
 #[derive(Template)]
 #[template(path = "device.html")]
 pub struct DeviceTemplate {
     pub index_template: IndexTemplate,
-    pub device_index: usize,
 }
 
 impl Deref for DeviceTemplate {
