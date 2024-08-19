@@ -27,6 +27,8 @@ impl<B: BufRead> ReadUpTo for B {
             let amt = read.len();
             let len = target.len();
 
+            // println!("r:{amt} t:{total} l:{len}");
+
             if amt < len {
                 target[..amt].copy_from_slice(read);
                 self.consume(amt);

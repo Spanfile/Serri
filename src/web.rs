@@ -12,7 +12,7 @@ use axum::{
         Path, WebSocketUpgrade,
     },
     http::StatusCode,
-    response::{Redirect, Response},
+    response::{IntoResponse, Redirect, Response},
     routing, Extension, Router,
 };
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
@@ -23,55 +23,89 @@ use tower_http::services::ServeDir;
 use crate::{
     config::SerriConfig,
     util::ReadUpTo,
-    web::template::{DeviceTemplate, IndexTemplate},
+    web::template::{
+        BaseTemplate, ConfigTemplate, DeviceTemplate, IndexTemplate, NotFoundTemplate,
+    },
 };
 
 const SERIAL_READ_BUFFER_SIZE: usize = 256;
 
-pub async fn run(config: SerriConfig) -> anyhow::Result<()> {
-    let config = Arc::new(config);
+pub async fn run(serri_config: SerriConfig) -> anyhow::Result<()> {
+    let serri_config = Arc::new(serri_config);
     let app = Router::new()
         .route("/", routing::get(root))
         .route("/device", routing::get(|| async { Redirect::to("/") }))
         .route("/device/:device_index", routing::get(device))
         .route("/device/:device_index/ws", routing::get(device_ws))
+        .route("/config", routing::get(config))
         .nest_service("/dist", ServeDir::new("dist"))
-        .layer(Extension(Arc::clone(&config)));
+        .fallback(not_found)
+        .layer(Extension(Arc::clone(&serri_config)));
 
-    let listener = tokio::net::TcpListener::bind(config.listen).await?;
+    let listener = tokio::net::TcpListener::bind(serri_config.listen).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-async fn root(Extension(config): Extension<Arc<SerriConfig>>) -> IndexTemplate {
+async fn not_found(Extension(serri_config): Extension<Arc<SerriConfig>>) -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        NotFoundTemplate {
+            base_template: BaseTemplate {
+                serri_config,
+                active_path: "",
+            },
+        },
+    )
+}
+
+async fn root(Extension(serri_config): Extension<Arc<SerriConfig>>) -> IndexTemplate {
     IndexTemplate {
-        config: Arc::clone(&config),
+        base_template: BaseTemplate {
+            serri_config,
+            active_path: "/",
+        },
         active_device_index: None,
-        active_path: String::from("/"),
+    }
+}
+
+async fn config(Extension(serri_config): Extension<Arc<SerriConfig>>) -> ConfigTemplate {
+    ConfigTemplate {
+        base_template: BaseTemplate {
+            serri_config,
+            active_path: "/config",
+        },
     }
 }
 
 async fn device(
     Path(device_index): Path<usize>,
-    Extension(config): Extension<Arc<SerriConfig>>,
-) -> DeviceTemplate {
+    Extension(serri_config): Extension<Arc<SerriConfig>>,
+) -> Response {
+    if device_index >= serri_config.serial_port.len() {
+        return Redirect::to("/").into_response();
+    }
+
     DeviceTemplate {
         index_template: IndexTemplate {
-            config: Arc::clone(&config),
+            base_template: BaseTemplate {
+                serri_config,
+                active_path: "/",
+            },
             active_device_index: Some(device_index),
-            active_path: String::from("/"),
         },
     }
+    .into_response()
 }
 
 async fn device_ws(
     Path(device_index): Path<usize>,
     ws: WebSocketUpgrade,
-    Extension(config): Extension<Arc<SerriConfig>>,
+    Extension(serri_config): Extension<Arc<SerriConfig>>,
 ) -> Response {
     println!("New WS connection for device {device_index}");
-    if let Some(port_config) = config.serial_port.get(device_index) {
+    if let Some(port_config) = serri_config.serial_port.get(device_index) {
         let port = match port_config.serial_device.open() {
             Ok(port) => port,
             Err(e) => {
@@ -87,7 +121,7 @@ async fn device_ws(
             }
         };
 
-        let banner = config.banner.clone();
+        let banner = serri_config.banner.clone();
 
         return ws.on_upgrade(move |mut socket| async {
             if let Some(banner) = banner
@@ -118,7 +152,7 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
     let (read_tx, mut read_rx) = tokio::sync::mpsc::channel(32);
 
     let reader_task = std::thread::spawn(move || {
-        let mut buf_reader = BufReader::with_capacity(SERIAL_READ_BUFFER_SIZE, reader);
+        let mut buf_reader = BufReader::new(reader);
         loop {
             // TODO: polled read
 
@@ -149,7 +183,7 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
         }
     });
 
-    // TODO: websocket pings
+    // TODO: websocket pings?
 
     loop {
         tokio::select! {
@@ -176,7 +210,7 @@ fn process_ws_message(
     serial_port: &mut TTYPort,
 ) -> bool {
     if let Some(Ok(msg)) = ws_msg {
-        println!("{msg:?}");
+        // println!("{msg:?}");
 
         if let Message::Text(text) = msg
             && let Err(e) = serial_port.write_all(text.as_bytes())

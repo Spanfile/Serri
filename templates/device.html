@@ -7,8 +7,9 @@
 
 <div class="col-lg p-3">
     <table class="table">
-        {% let port = config.serial_port[active_device_index.expect("active device not set for
-        device template")] %}
+        {% let port = serri_config.serial_port[
+        active_device_index.expect("active device not set for device template")
+        ] %}
         <tbody>
         <tr>
             <th scope="row" class="text-nowrap">Device</th>

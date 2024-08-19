@@ -13,6 +13,7 @@ use crate::util::MaybeSplitOnce;
 pub struct SerriConfig {
     pub listen: SocketAddr,
     pub banner: Option<String>,
+    #[serde(default)]
     pub serial_port: Vec<SerialPortConfig>,
 }
 
