@@ -1,10 +1,11 @@
-use std::{fmt, fmt::Formatter, net::SocketAddr, num::ParseIntError, str::FromStr, time::Duration};
+use std::{fmt, fmt::Formatter, net::SocketAddr, num::ParseIntError, str::FromStr};
 
+use mio_serial::{SerialPortBuilderExt, SerialStream};
 use serde::{
     de::{Error, Unexpected, Visitor},
     Deserialize, Deserializer,
 };
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits, TTYPort};
+use serialport::{DataBits, FlowControl, Parity, StopBits};
 use thiserror::Error;
 
 use crate::util::MaybeSplitOnce;
@@ -70,16 +71,16 @@ pub enum SerialDeviceParseError {
 }
 
 impl SerialDevice {
-    pub fn open(&self) -> anyhow::Result<TTYPort> {
-        let mut port = serialport::new(&self.device, self.baud_rate)
+    pub fn open(&self) -> anyhow::Result<SerialStream> {
+        let mut port = mio_serial::new(&self.device, self.baud_rate)
             .data_bits(self.serial_params.data_bits)
             .parity(self.serial_params.parity)
             .stop_bits(self.serial_params.stop_bits)
             .flow_control(self.serial_params.flow_control)
-            .open_native()?;
+            .open_native_async()?;
 
-        port.set_timeout(Duration::from_millis(20))
-            .expect("failed to set serial port timeout");
+        // port.set_timeout(Duration::from_millis(20))
+        //     .expect("failed to set serial port timeout");
 
         port.set_exclusive(true)
             .expect("failed to set serial port exclusive");
