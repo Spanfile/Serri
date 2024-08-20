@@ -1,12 +1,12 @@
 listen = "127.0.0.1:8080"
-banner = "Connected to %d"
+banner = "Connected to {device}"
 
 [[serial_port]]
 device = "/dev/ttyUSB0:115200"
 
 [[serial_port]]
-title = "Test 1"
-device = "/dev/ttyUSB1:115200:7E2"
+title = "Slow"
+device = "/dev/ttyUSB0:9600"
 
 [[serial_port]]
 description = "Port 1 in the adapter"

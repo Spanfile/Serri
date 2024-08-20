@@ -14,7 +14,7 @@ pub struct BaseTemplate {
 #[derive(Template)]
 #[template(path = "404.html")]
 pub struct NotFoundTemplate {
-    pub base_template: BaseTemplate
+    pub base_template: BaseTemplate,
 }
 
 #[derive(Template)]

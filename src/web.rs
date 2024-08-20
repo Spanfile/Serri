@@ -6,9 +6,8 @@ use std::{
 };
 
 use axum::{
-    body::Body,
     extract::{
-        ws::{Message, WebSocket},
+        ws::{close_code, CloseFrame, Message, WebSocket},
         Path, WebSocketUpgrade,
     },
     http::StatusCode,
@@ -16,7 +15,9 @@ use axum::{
     routing, Extension, Router,
 };
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
+use serde::Serialize;
 use serialport::{SerialPort, TTYPort};
+use tinytemplate::TinyTemplate;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tower_http::services::ServeDir;
@@ -30,6 +31,12 @@ use crate::{
 };
 
 const SERIAL_READ_BUFFER_SIZE: usize = 256;
+
+#[derive(Serialize)]
+struct BannerContext {
+    device: String,
+    device_index: usize,
+}
 
 pub async fn run(serri_config: SerriConfig) -> anyhow::Result<()> {
     let serri_config = Arc::new(serri_config);
@@ -107,50 +114,92 @@ async fn device_ws(
 ) -> Response {
     println!("New WS connection for device {device_index}");
 
-    if let Some(port_config) = serri_config.serial_port.get(device_index) {
-        let serial_stream = match port_config.serial_device.open() {
-            Ok(port) => port,
-            Err(e) => {
-                println!(
-                    "Failed to open serial device {}: {e}",
-                    port_config.serial_device.device
-                );
+    ws.on_upgrade(move |mut socket| async move {
+        if let Some(port_config) = serri_config.serial_port.get(device_index) {
+            let serial_port = match port_config.serial_device.open() {
+                Ok(port) => port,
+                Err(e) => {
+                    println!(
+                        "Failed to open serial device {}: {e}",
+                        port_config.serial_device.device
+                    );
 
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::new(format!("Failed to open serial device: {e}")))
-                    .unwrap();
+                    let _ = socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: close_code::ERROR,
+                            reason: format!("Failed to open serial device: {e}",).into(),
+                        })))
+                        .await;
+
+                    return;
+                }
+            };
+
+            let banner = serri_config.banner.clone();
+
+            if let Some(banner) = banner {
+                let banner_context = create_banner_context(&serial_port, device_index);
+                match render_banner_template(banner, banner_context) {
+                    Ok(rendered) => {
+                        let Ok(_) = socket.send(Message::Text(rendered)).await else {
+                            return;
+                        };
+                    }
+
+                    Err(e) => {
+                        println!("Failed to render banner template: {e:?}");
+
+                        let Ok(_) = socket
+                            .send(Message::Text(
+                                "Failed to render banner template".to_string(),
+                            ))
+                            .await
+                        else {
+                            return;
+                        };
+                    }
+                }
             }
-        };
 
-        let banner = serri_config.banner.clone();
-
-        return ws.on_upgrade(move |mut socket| async move {
-            if let Some(banner) = banner
-                && let Err(e) = socket.send(Message::Text(banner)).await
-            {
-                println!("Failed to send banner to WS: {e}");
-                return;
-            }
-
-            handle_device_ws(socket, serial_stream).await
-        });
-    }
-
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(Body::new(String::from("Device not found")))
-        .unwrap()
+            handle_device_ws(socket, serial_port).await
+        }
+    })
 }
 
-async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
-    let (mut ws_tx, mut ws_rx) = socket.split();
+fn render_banner_template(banner: String, context: BannerContext) -> anyhow::Result<String> {
+    let mut template_renderer = TinyTemplate::new();
+    template_renderer.add_template("banner", &banner)?;
 
-    let serial_reader = BufReader::new(
-        serial_port
-            .try_clone_native()
-            .expect("failed to clone serial port"),
-    );
+    let rendered = template_renderer.render("banner", &context)?;
+    Ok(rendered)
+}
+
+fn create_banner_context(serial_port: &TTYPort, device_index: usize) -> BannerContext {
+    BannerContext {
+        device: serial_port
+            .name()
+            .unwrap_or_else(|| "unnamed device".to_string()),
+        device_index,
+    }
+}
+
+async fn handle_device_ws(mut socket: WebSocket, mut serial_port: TTYPort) {
+    let Ok(cloned_port) = serial_port.try_clone_native() else {
+        let _ = socket
+            .send(Message::Close(Some(CloseFrame {
+                code: close_code::ERROR,
+                reason: "Failed to clone serial device".into(),
+            })))
+            .await;
+
+        return;
+    };
+
+    let serial_reader = BufReader::new(cloned_port);
+
+    // TODO: fork and update tokio-serial if it starts working again?
+    // i tried to be a good boy and use polling to read from the serial ports but both of my USB
+    // serial adapters misbehaved when polled so blocking reader thread per connection it is
 
     let cancel_token = CancellationToken::new();
     let read_cancel_token = cancel_token.clone();
@@ -160,6 +209,7 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
         std::thread::spawn(move || serial_reader_task(serial_reader, read_tx, read_cancel_token));
 
     // TODO: websocket pings?
+    let (mut ws_tx, mut ws_rx) = socket.split();
 
     loop {
         // println!("Main loop");
@@ -174,12 +224,29 @@ async fn handle_device_ws(socket: WebSocket, mut serial_port: TTYPort) {
         }
     }
 
-    println!("WS closing");
+    println!("Closing WS for {:?}", serial_port.name());
 
     cancel_token.cancel();
     if let Err(e) = reader_task.join() {
-        println!("Reader task failed: {e:?}");
+        let reason = if let Ok(error) = e.downcast::<String>() {
+            format!("Failed to read from serial device: {error}").into()
+        } else {
+            "Failed to read from serial device".into()
+        };
+
+        println!("Serial reader task failed: {reason}");
+
+        let _ = ws_tx
+            .send(Message::Close(Some(CloseFrame {
+                code: close_code::ERROR,
+                reason,
+            })))
+            .await;
+
+        return;
     }
+
+    let _ = ws_tx.close().await;
 }
 
 fn serial_reader_task(
@@ -187,32 +254,30 @@ fn serial_reader_task(
     read_tx: mpsc::Sender<Vec<u8>>,
     read_cancel_token: CancellationToken,
 ) {
+    let mut buf = [0u8; SERIAL_READ_BUFFER_SIZE];
     loop {
-        let mut buf = [0u8; SERIAL_READ_BUFFER_SIZE];
         match serial_reader.read_up_to(&mut buf) {
             Ok(amt) if amt > 0 => {
                 println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
                 read_tx
                     .blocking_send(buf[..amt].to_vec())
-                    .expect("failed to notify read buf");
+                    .expect("Read channel closed");
             }
 
             // my read_up_to should never return TimedOut but hey
             Err(e) if e.kind() != ErrorKind::TimedOut => {
-                println!(
-                    "Failed to read from serial ({:?}): {e:?}",
-                    serial_reader.get_ref().name()
-                );
-                break;
+                panic!("{e}");
             }
 
-            _ => {
-                // println!("Timed out")
-            }
+            _ => (),
         }
 
         if read_cancel_token.is_cancelled() {
-            println!("Reader closing for {:?}", serial_reader.get_ref().name());
+            println!(
+                "Reader closing for {:?} (cancelled)",
+                serial_reader.get_ref().name()
+            );
+
             break;
         }
     }
@@ -222,35 +287,49 @@ fn process_ws_message(
     ws_msg: Option<Result<Message, axum::Error>>,
     serial_port: &mut TTYPort,
 ) -> bool {
-    if let Some(Ok(msg)) = ws_msg {
-        // println!("{msg:?}");
+    let Some(Ok(msg)) = ws_msg else {
+        println!("WS client disconnected for {:?}", serial_port.name());
+        return false;
+    };
 
-        if let Message::Text(text) = msg
-            && let Err(e) = serial_port.write_all(text.as_bytes())
-        {
-            println!("Writing to serial port failed: {e:?}");
+    // println!("{msg:?}");
+
+    match msg {
+        Message::Text(text) => {
+            if let Err(e) = serial_port.write_all(text.as_bytes()) {
+                println!(
+                    "Writing to serial port ({:?}) failed: {e:?}",
+                    serial_port.name()
+                );
+
+                return false;
+            }
+        }
+
+        Message::Close(close_frame) => {
+            println!("WS client closed connection {close_frame:?}");
             return false;
         }
 
-        true
-    } else {
-        false
+        _ => println!("Unhandled WS message: {msg:?}"),
     }
+
+    true
 }
 
 async fn process_serial_read(
     read_buf: Option<Vec<u8>>,
     ws_tx: &mut SplitSink<WebSocket, Message>,
 ) -> bool {
-    if let Some(read_buf) = read_buf {
-        if let Err(e) = ws_tx.send(Message::Binary(read_buf)).await {
-            println!("Writing to WS failed: {e:?}");
-            return false;
-        }
-
-        true
-    } else {
+    let Some(read_buf) = read_buf else {
         println!("Reader task channel closed");
-        false
+        return false;
+    };
+
+    if let Err(e) = ws_tx.send(Message::Binary(read_buf)).await {
+        println!("Writing to WS failed: {e:?}");
+        return false;
     }
+
+    true
 }

@@ -16,3 +16,4 @@ tokio = { version = "1.39.2", features = ["macros", "net", "rt-multi-thread", "s
 toml = "0.8.19"
 tower-http = { version = "0.5.2", features = ["fs"] }
 tokio-util = "0.7.11"
+tinytemplate = "1.2.1"

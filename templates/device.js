@@ -7,6 +7,31 @@ const term = new Terminal({
   fontFamily: 'monospace'
 })
 
+const ws = new WebSocket(window.location + '/ws')
+
+ws.onerror = (ev) => {
+  console.log("ws error: " + ev.message)
+  console.log(ev)
+}
+
+ws.onopen = (_) => {
+  const attachAddon = new AttachAddon(ws)
+  term.loadAddon(attachAddon)
+}
+
+ws.onclose = (ev) => {
+  console.log("ws closing: " + ev.reason)
+  console.log(ev)
+
+  if (!ev.wasClean) {
+    if (ev.reason.length > 0) {
+      appendWsAlert(ev.reason)
+    } else {
+      appendWsAlert("Connection closed unexpectedly")
+    }
+  }
+}
+
 term.open(document.getElementById('terminal'))
 
 document.getElementById('numTerminalColumns').value = term.options.cols
@@ -18,25 +43,4 @@ document.getElementById('btnApplyTerminalSize').onclick = (ev) => {
 
   console.log('resizing terminal to ' + cols + ' by ' + rows)
   term.resize(cols, rows)
-}
-
-const ws = new WebSocket(window.location + '/ws')
-
-ws.onerror = (ev) => {
-  console.log("ws error:")
-  console.log(ev)
-}
-
-ws.onopen = (ev) => {
-  const attachAddon = new AttachAddon(ws)
-  term.loadAddon(attachAddon)
-}
-
-ws.onclose = (ev) => {
-  console.log("ws closing:")
-  console.log(ev)
-
-  if (!ev.wasClean) {
-    appendWsAlert("WebSocket connection closed")
-  }
 }
