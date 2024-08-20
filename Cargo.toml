@@ -16,6 +16,3 @@ tokio = { version = "1.39.2", features = ["macros", "net", "rt-multi-thread", "s
 toml = "0.8.19"
 tower-http = { version = "0.5.2", features = ["fs"] }
 tokio-util = "0.7.11"
-
-mio-serial = { path = "../mio-serial" }
-mio = { version = "1.0.2", features = ["os-poll"] }
