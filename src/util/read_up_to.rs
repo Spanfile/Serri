@@ -5,10 +5,10 @@ pub trait ReadUpTo: BufRead {
 }
 
 impl<B: BufRead> ReadUpTo for B {
-    /// Continuously reads data until the given buffer is filled or the read times out, in which
-    /// case the amount of bytes read is returned. It is possible the returned amount is 0 if the
-    /// first read already times out. If an `ErrorKind::Interrupted` is encountered, it is
-    /// ignored. Any other errors are returned.
+    /// Continuously reads data until the given buffer is filled or the read times out/would block,
+    /// in which case the amount of bytes read is returned. It is possible the returned amount
+    /// is 0 if the first read already times out/would block. If an `ErrorKind::Interrupted` is
+    /// encountered, it is ignored. Any other errors are returned.
     fn read_up_to(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut total = 0;
         loop {
@@ -18,7 +18,7 @@ impl<B: BufRead> ReadUpTo for B {
 
             let read = match self.fill_buf() {
                 Ok(read) => read,
-                Err(e) if e.kind() == ErrorKind::TimedOut => return Ok(total),
+                Err(e) if timed_out_or_would_block(e.kind()) => return Ok(total),
                 Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             };
@@ -40,4 +40,8 @@ impl<B: BufRead> ReadUpTo for B {
             }
         }
     }
+}
+
+fn timed_out_or_would_block(kind: ErrorKind) -> bool {
+    kind == ErrorKind::TimedOut || kind == ErrorKind::WouldBlock
 }

@@ -17,3 +17,9 @@ toml = "0.8.19"
 tower-http = { version = "0.5.2", features = ["fs"] }
 tokio-util = "0.7.11"
 tinytemplate = "1.2.1"
+
+[workspace.metadata.cross.target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install libudev-dev:$CROSS_DEB_ARCH"
+]

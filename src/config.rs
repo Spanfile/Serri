@@ -13,6 +13,7 @@ use crate::util::MaybeSplitOnce;
 pub struct SerriConfig {
     pub listen: SocketAddr,
     pub banner: Option<String>,
+    pub default_read_buffer_size: Option<usize>,
     #[serde(default)]
     pub serial_port: Vec<SerialPortConfig>,
 }
@@ -21,6 +22,7 @@ pub struct SerriConfig {
 pub struct SerialPortConfig {
     pub title: Option<String>,
     pub description: Option<String>,
+    pub read_buffer_size: Option<usize>,
     #[serde(flatten)]
     pub serial_device: SerialDevice,
 }
@@ -78,7 +80,7 @@ impl SerialDevice {
             .flow_control(self.serial_params.flow_control)
             .open_native()?;
 
-        port.set_timeout(Duration::from_millis(20))
+        port.set_timeout(Duration::from_millis(10))
             .expect("failed to set serial port timeout");
 
         port.set_exclusive(true)

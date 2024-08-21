@@ -1,16 +1,20 @@
-listen = "127.0.0.1:8080"
+listen = "0.0.0.0:8080"
 banner = "Connected to {device}"
 
 [[serial_port]]
+read_buffer_size = 512
 device = "/dev/ttyUSB0:115200"
 
 [[serial_port]]
-title = "Slow"
+title = "9600 baud"
+read_buffer_size = 32
 device = "/dev/ttyUSB0:9600"
 
 [[serial_port]]
-description = "Port 1 in the adapter"
-device = "/dev/ttyUSB1:115200:7E2"
+title = "300 baud"
+description = "Serial like its a Bell 103"
+read_buffer_size = 1
+device = "/dev/ttyUSB0:300"
 
 [[serial_port]]
 title = "My Cool Device"
