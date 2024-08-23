@@ -16,7 +16,7 @@ pub async fn run(serri_config: SerriConfig) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", routing::get(root))
         .route("/config", routing::get(config))
-        .nest("/device", device::router())
+        .nest("/device", device::router()?)
         .nest_service("/dist", ServeDir::new("dist"))
         .fallback(not_found)
         .layer(Extension(Arc::clone(&serri_config)));

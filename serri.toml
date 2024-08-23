@@ -18,7 +18,7 @@ device = "/dev/ttyUSB0:300"
 
 [[serial_port]]
 title = "My Cool Device"
-description = "Port 2 in the adapter"
+description = "Cool description"
 device = "/dev/ttyUSB2:115200:8N1"
 
 [[serial_port]]

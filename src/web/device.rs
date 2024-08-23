@@ -13,11 +13,12 @@ use axum::{
     routing, Extension, Router,
 };
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
+use mio::{Events, Interest, Poll, Registry, Token};
+use mio_serial::SerialStream;
 use serde::Serialize;
-use serialport::{SerialPort, TTYPort};
+use serialport::SerialPort;
 use tinytemplate::TinyTemplate;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
+use tokio::sync::{broadcast, broadcast::error::RecvError};
 
 use crate::{
     config::{SerialPortConfig, SerriConfig},
@@ -32,11 +33,38 @@ struct BannerContext<'a> {
     device: &'a str,
 }
 
-pub fn router() -> Router {
-    Router::new()
+pub fn router() -> anyhow::Result<Router> {
+    let poll = Poll::new()?;
+    let events = Events::with_capacity(32);
+    let registry = poll
+        .registry()
+        .try_clone()
+        .expect("failed to clone poll registry");
+
+    let (event_tx, _) = broadcast::channel::<Token>(32);
+    let event_tx_clone = event_tx.clone();
+    let _serial_reader_thread =
+        std::thread::spawn(|| serial_reader_thread(poll, events, event_tx_clone));
+
+    Ok(Router::new()
         .route("/", routing::get(|| async { Redirect::to("/") }))
         .route("/:device_index", routing::get(device))
         .route("/:device_index/ws", routing::get(device_ws))
+        .layer(Extension(Arc::new(registry)))
+        .layer(Extension(event_tx.clone())))
+}
+
+fn serial_reader_thread(mut poll: Poll, mut events: Events, event_tx: broadcast::Sender<Token>) {
+    loop {
+        // println!("polling...");
+        poll.poll(&mut events, None)
+            .expect("failed to poll serial devices");
+
+        for event in events.iter() {
+            // println!("Event: {event:?}");
+            let _ = event_tx.send(event.token());
+        }
+    }
 }
 
 async fn device(
@@ -63,6 +91,8 @@ async fn device_ws(
     Path(device_index): Path<usize>,
     ws: WebSocketUpgrade,
     Extension(serri_config): Extension<Arc<SerriConfig>>,
+    Extension(registry): Extension<Arc<Registry>>,
+    Extension(event_tx): Extension<broadcast::Sender<Token>>,
 ) -> Response {
     println!("New WS connection for device {device_index}");
 
@@ -71,7 +101,18 @@ async fn device_ws(
             return;
         };
 
-        handle_device_ws(socket, &serri_config, port_config).await
+        let token = Token(device_index);
+        let event_rx = event_tx.subscribe();
+
+        handle_device_ws(
+            socket,
+            &serri_config,
+            port_config,
+            token,
+            event_rx,
+            registry,
+        )
+        .await
     })
 }
 
@@ -79,6 +120,9 @@ async fn handle_device_ws(
     mut socket: WebSocket,
     serri_config: &SerriConfig,
     port_config: &SerialPortConfig,
+    token: Token,
+    mut event_rx: broadcast::Receiver<Token>,
+    registry: Arc<Registry>,
 ) {
     let mut serial_port = match port_config.serial_device.open() {
         Ok(port) => port,
@@ -99,40 +143,21 @@ async fn handle_device_ws(
         }
     };
 
-    let Ok(cloned_port) = serial_port.try_clone_native() else {
-        let _ = socket
-            .send(Message::Close(Some(CloseFrame {
-                code: close_code::ERROR,
-                reason: "Failed to clone serial device".into(),
-            })))
-            .await;
-
-        return;
-    };
-
     if let Some(banner) = serri_config.banner.as_deref()
         && send_banner(&mut socket, banner, port_config).await.is_err()
     {
         return;
     };
 
-    let serial_reader = BufReader::new(cloned_port);
+    registry
+        .register(&mut serial_port, token, Interest::READABLE)
+        .expect("failed to register serial stream for polling");
+
+    let mut serial_reader = BufReader::new(serial_port);
     let read_buffer_size = port_config
         .read_buffer_size
         .or(serri_config.default_read_buffer_size)
         .unwrap_or(DEFAULT_SERIAL_READ_BUFFER_SIZE);
-
-    // TODO: fork and update tokio-serial if it starts working again?
-    // i tried to be a good boy and use polling to read from the serial ports but both of my USB
-    // serial adapters misbehaved when polled so blocking reader thread per connection it is
-
-    let cancel_token = CancellationToken::new();
-    let read_cancel_token = cancel_token.clone();
-    let (read_tx, mut read_rx) = mpsc::channel(32);
-
-    let reader_task = std::thread::spawn(move || {
-        serial_reader_task(serial_reader, read_buffer_size, read_tx, read_cancel_token)
-    });
 
     // TODO: websocket pings?
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -140,39 +165,22 @@ async fn handle_device_ws(
     loop {
         // println!("Main loop");
         tokio::select! {
-            ws_msg = ws_rx.next() => if !process_ws_message(ws_msg, &mut serial_port) {
+            ws_msg = ws_rx.next() => if !process_ws_message(ws_msg, serial_reader.get_mut()) {
                 break;
             },
 
-            read_buf = read_rx.recv() => if !process_serial_read(read_buf, &mut ws_tx).await {
+            rx_event = event_rx.recv() => if !process_mio_event(token, rx_event, &mut serial_reader, &mut ws_tx, read_buffer_size).await {
                 break;
             }
         }
     }
 
-    println!("Closing WS for {:?}", serial_port.name());
-
-    cancel_token.cancel();
-    if let Err(e) = reader_task.join() {
-        let reason = format!(
-            "Failed to read from serial device{}",
-            e.downcast::<String>().map(|e| format!(": {e}")).unwrap_or("".into())
-        )
-        .into();
-
-        println!("Serial reader task failed: {reason}");
-
-        let _ = ws_tx
-            .send(Message::Close(Some(CloseFrame {
-                code: close_code::ERROR,
-                reason,
-            })))
-            .await;
-
-        return;
-    }
-
+    println!("Closing WS for {:?}", serial_reader.get_ref().name());
     let _ = ws_tx.close().await;
+
+    registry
+        .deregister(&mut serial_reader.into_inner())
+        .expect("failed to deregister serial stream from polling");
 }
 
 async fn send_banner(
@@ -211,41 +219,9 @@ fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Resul
     Ok(rendered)
 }
 
-fn serial_reader_task(
-    mut serial_reader: BufReader<TTYPort>,
-    read_buffer_size: usize,
-    read_tx: mpsc::Sender<Vec<u8>>,
-    read_cancel_token: CancellationToken,
-) {
-    let mut buf = vec![0u8; read_buffer_size];
-    loop {
-        match serial_reader.read_up_to(&mut buf) {
-            Ok(amt) if amt > 0 => {
-                println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
-                read_tx
-                    .blocking_send(buf[..amt].to_vec())
-                    .expect("Read channel closed");
-            }
-
-            // my read_up_to should never return TimedOut but hey
-            Err(e) if e.kind() != ErrorKind::TimedOut => panic!("{e}"),
-            _ => (),
-        }
-
-        if read_cancel_token.is_cancelled() {
-            println!(
-                "Reader closing for {:?} (cancelled)",
-                serial_reader.get_ref().name()
-            );
-
-            break;
-        }
-    }
-}
-
 fn process_ws_message(
     ws_msg: Option<Result<Message, axum::Error>>,
-    serial_port: &mut TTYPort,
+    serial_port: &mut SerialStream,
 ) -> bool {
     let Some(Ok(msg)) = ws_msg else {
         println!("WS client disconnected for {:?}", serial_port.name());
@@ -277,19 +253,46 @@ fn process_ws_message(
     true
 }
 
-async fn process_serial_read(
-    read_buf: Option<Vec<u8>>,
+async fn process_mio_event(
+    token: Token,
+    rx_event: Result<Token, RecvError>,
+    serial_reader: &mut BufReader<SerialStream>,
     ws_tx: &mut SplitSink<WebSocket, Message>,
+    read_buffer_size: usize,
 ) -> bool {
-    let Some(read_buf) = read_buf else {
-        println!("Reader task channel closed");
-        return false;
-    };
+    match rx_event {
+        Ok(recv_token) if recv_token == token => {
+            let mut read_buf = vec![0u8; read_buffer_size];
+            match serial_reader.read_up_to(&mut read_buf) {
+                Ok(amt) if amt > 0 => {
+                    println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
+                    if let Err(e) = ws_tx.send(Message::Binary(read_buf[..amt].to_vec())).await {
+                        println!("Writing to websocket failed: {e:?}");
+                        return false;
+                    }
 
-    if let Err(e) = ws_tx.send(Message::Binary(read_buf)).await {
-        println!("Writing to WS failed: {e:?}");
-        return false;
+                    true
+                }
+
+                Err(e) if e.kind() != ErrorKind::WouldBlock => {
+                    println!("Failed to read from serial port: {e:?}");
+                    false
+                }
+
+                _ => true,
+            }
+        }
+
+        Ok(_) => true,
+
+        Err(RecvError::Closed) => {
+            println!("Event channel closed");
+            false
+        }
+
+        Err(RecvError::Lagged(lag)) => {
+            println!("Event channel lagged by {lag} messages");
+            true
+        }
     }
-
-    true
 }
