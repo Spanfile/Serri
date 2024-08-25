@@ -28,6 +28,7 @@ pub struct IndexTemplate {
 #[template(path = "device.html")]
 pub struct DeviceTemplate {
     pub index_template: IndexTemplate,
+    pub preserve_history: bool,
 }
 
 #[derive(Template)]

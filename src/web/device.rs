@@ -6,10 +6,11 @@ use axum::{
         ws::{Message, WebSocket},
         Path, WebSocketUpgrade,
     },
+    http::StatusCode,
     response::Redirect,
-    routing, Extension, Router,
+    routing, Extension, Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tinytemplate::TinyTemplate;
 use tokio::sync::{broadcast, mpsc};
 
@@ -24,20 +25,36 @@ struct BannerContext<'a> {
     device: &'a str,
 }
 
+#[derive(Deserialize, Serialize)]
+struct PreserveHistoryBody {
+    preserve_history: bool,
+}
+
 pub fn router() -> Router {
     Router::new()
         .route("/", routing::get(|| async { Redirect::to("/") }))
-        .route("/:device_index", routing::get(device))
-        .route("/:device_index/ws", routing::get(device_ws))
+        .route("/:device_index", routing::get(get_device))
+        .route("/:device_index/ws", routing::get(get_device_ws))
+        .route(
+            "/:device_index/clear_history",
+            routing::post(post_clear_history),
+        )
+        .route(
+            "/:device_index/preserve_history",
+            routing::get(get_preserve_history).post(post_preserve_history),
+        )
 }
 
-async fn device(
+async fn get_device(
     Path(device_index): Path<usize>,
     Extension(serri_config): Extension<Arc<SerriConfig>>,
+    Extension(controllers): Extension<Arc<Vec<SerialController>>>,
 ) -> Response {
     if device_index >= serri_config.serial_port.len() {
         return Redirect::to("/").into_response();
     }
+
+    let controller = &controllers[device_index];
 
     DeviceTemplate {
         index_template: IndexTemplate {
@@ -47,11 +64,52 @@ async fn device(
             },
             active_device_index: Some(device_index),
         },
+        preserve_history: controller.get_preserve_history(),
     }
     .into_response()
 }
 
-async fn device_ws(
+async fn post_clear_history(
+    Path(device_index): Path<usize>,
+    Extension(controllers): Extension<Arc<Vec<SerialController>>>,
+) -> StatusCode {
+    let Some(controller) = controllers.get(device_index) else {
+        return StatusCode::NOT_FOUND;
+    };
+
+    controller.clear_history().await;
+    StatusCode::OK
+}
+
+async fn get_preserve_history(
+    Path(device_index): Path<usize>,
+    Extension(controllers): Extension<Arc<Vec<SerialController>>>,
+) -> Response {
+    let Some(controller) = controllers.get(device_index) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    Json(PreserveHistoryBody {
+        preserve_history: controller.get_preserve_history(),
+    })
+    .into_response()
+}
+
+async fn post_preserve_history(
+    Path(device_index): Path<usize>,
+    Extension(controllers): Extension<Arc<Vec<SerialController>>>,
+    Json(preserve_history_body): Json<PreserveHistoryBody>,
+) -> StatusCode {
+    let Some(controller) = controllers.get(device_index) else {
+        return StatusCode::NOT_FOUND;
+    };
+
+    // TODO: if disabling preserve, clear history?
+    controller.set_preserve_history(preserve_history_body.preserve_history);
+    StatusCode::OK
+}
+
+async fn get_device_ws(
     Path(device_index): Path<usize>,
     ws: WebSocketUpgrade,
     Extension(serri_config): Extension<Arc<SerriConfig>>,

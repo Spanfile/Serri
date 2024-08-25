@@ -2,7 +2,6 @@ listen = "0.0.0.0:8080"
 banner = "Connected to {device}"
 
 [[serial_port]]
-read_buffer_size = 512
 device = "/dev/ttyUSB0:115200"
 
 #[[serial_port]]

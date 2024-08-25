@@ -38,28 +38,8 @@
         </tbody>
     </table>
 
-    <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" role="switch" value="" id="checkLocalEcho">
-        <label class="form-check-label" for="checkLocalEcho">
-            Local echo
-        </label>
-    </div>
-    <div class="form-text mb-3">
-        Print input locally to the terminal.
-    </div>
-
-    <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" role="switch" value="" id="checkAutoResize">
-        <label class="form-check-label" for="checkAutoResize">
-            Auto-resize terminal
-        </label>
-    </div>
-    <div class="form-text mb-3">
-        Automatically resize terminal to fit screen.
-    </div>
-
     <label class="form-label">Terminal size</label>
-    <div class="row g-3 align-items-center">
+    <div class="row g-3 mb-3 align-items-center">
         <div class="col">
             <label class="visually-hidden" for="numTerminalColumns">Columns</label>
             <input type="number" class="form-control" id="numTerminalColumns" placeholder="80">
@@ -74,6 +54,30 @@
             <button class="btn btn-primary" type="button" id="btnApplyTerminalSize">Apply</button>
         </div>
     </div>
+
+    <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" role="switch" id="checkAutoResize">
+        <label class="form-check-label" for="checkAutoResize">
+            Auto-resize terminal
+        </label>
+    </div>
+    <div class="form-text mb-3">
+        Automatically resize terminal to fit screen.
+    </div>
+
+    <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" role="switch"
+               id="checkPreserveHistory"
+               {% if preserve_history %} checked {% endif %}>
+        <label class="form-check-label" for="checkPreserveHistory">
+            Preserve history
+        </label>
+    </div>
+    <div class="form-text mb-3">
+        Preserve serial console history.
+    </div>
+
+    <button id="btnClearHistory" class="btn btn-secondary" type="button">Clear history</button>
 
     <hr>
     <button class="btn btn-primary" type="button">Pop-out</button>

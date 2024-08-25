@@ -1,11 +1,11 @@
-use std::{fmt, fmt::Formatter, net::SocketAddr, num::ParseIntError, str::FromStr, time::Duration};
+use std::{fmt, fmt::Formatter, net::SocketAddr, num::ParseIntError, str::FromStr};
 
 use mio_serial::{SerialPortBuilderExt, SerialStream};
 use serde::{
     de::{Error, Unexpected, Visitor},
     Deserialize, Deserializer,
 };
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
+use serialport::{DataBits, FlowControl, Parity, StopBits};
 use thiserror::Error;
 
 use crate::util::MaybeSplitOnce;
@@ -16,6 +16,8 @@ pub struct SerriConfig {
     pub banner: Option<String>,
     pub default_history_size: Option<usize>,
     pub default_read_buffer_size: Option<usize>,
+    pub preserve_history: Option<bool>,
+
     #[serde(default)]
     pub serial_port: Vec<SerialPortConfig>,
 }
@@ -26,6 +28,8 @@ pub struct SerialPortConfig {
     pub description: Option<String>,
     pub history_size: Option<usize>,
     pub read_buffer_size: Option<usize>,
+    pub preserve_history: Option<bool>,
+
     #[serde(flatten)]
     pub serial_device: SerialDevice,
 }
@@ -83,8 +87,8 @@ impl SerialDevice {
             .flow_control(self.serial_params.flow_control)
             .open_native_async()?;
 
-        port.set_timeout(Duration::from_millis(10))
-            .expect("failed to set serial port timeout");
+        // port.set_timeout(Duration::from_millis(10))
+        //     .expect("failed to set serial port timeout");
 
         port.set_exclusive(true)
             .expect("failed to set serial port exclusive");

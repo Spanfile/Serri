@@ -17,9 +17,12 @@ toml = "0.8.19"
 tower-http = { version = "0.5.2", features = ["fs"] }
 tokio-util = "0.7.11"
 tinytemplate = "1.2.1"
-mio-serial = "5.0.5"
-mio = { version = "0.8.11", features = ["os-ext", "os-poll"] }
+# mio-serial = "5.0.5"
+# mio = { version = "0.8.11", features = ["os-ext", "os-poll"] }
 ringbuf = "0.4.4"
+
+mio = { version = "1.0.2", features = ["os-ext", "os-poll"] }
+mio-serial = { path = "../mio-serial" }
 
 [workspace.metadata.cross.target.aarch64-unknown-linux-gnu]
 pre-build = [

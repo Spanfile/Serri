@@ -1,6 +1,9 @@
 use std::{
     io::{BufReader, ErrorKind, Write},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::anyhow;
@@ -19,8 +22,9 @@ use crate::{
     util::ReadUpTo,
 };
 
-const DEFAULT_SERIAL_HISTORY_SIZE: usize = 1024 * 1024;
+const DEFAULT_SERIAL_HISTORY_SIZE: usize = 100 * 1024;
 const DEFAULT_SERIAL_READ_BUFFER_SIZE: usize = 64;
+const DEFAULT_PRESERVE_HISTORY: bool = true;
 
 pub struct SerialController {
     inner: Arc<SerialControllerRef>,
@@ -33,6 +37,7 @@ struct SerialControllerRef {
     serial_reader: Mutex<BufReader<SerialStream>>,
     read_buffer_size: usize,
     history: Mutex<HeapRb<u8>>,
+    preserve_history: AtomicBool,
 
     serial_read_tx: broadcast::Sender<Vec<u8>>,
     serial_write_tx: mpsc::Sender<Vec<u8>>,
@@ -57,10 +62,17 @@ impl SerialController {
             .read_buffer_size
             .or(serri_config.default_read_buffer_size)
             .unwrap_or(DEFAULT_SERIAL_READ_BUFFER_SIZE);
+
         let history_size = port_config
             .history_size
             .or(serri_config.default_history_size)
             .unwrap_or(DEFAULT_SERIAL_HISTORY_SIZE);
+
+        // TODO: don't allocate history ringbuf if preserve is disabled?
+        let preserve_history = port_config
+            .preserve_history
+            .or(serri_config.preserve_history)
+            .unwrap_or(DEFAULT_PRESERVE_HISTORY);
 
         let (serial_read_tx, _) = broadcast::channel::<Vec<u8>>(32);
         let (serial_write_tx, serial_write_rx) = mpsc::channel::<Vec<u8>>(32);
@@ -72,6 +84,7 @@ impl SerialController {
                 serial_reader: Mutex::new(serial_reader),
                 read_buffer_size,
                 history: Mutex::new(HeapRb::new(history_size)),
+                preserve_history: AtomicBool::new(preserve_history),
                 serial_read_tx,
                 serial_write_tx,
                 serial_write_rx: Mutex::new(serial_write_rx),
@@ -96,6 +109,22 @@ impl SerialController {
         history_vec.extend_from_slice(right);
 
         history_vec
+    }
+
+    pub async fn clear_history(&self) {
+        let mut history = self.inner.history.lock().await;
+        let amt = history.clear();
+        println!("Cleared {amt} bytes from history");
+    }
+
+    pub fn get_preserve_history(&self) -> bool {
+        self.inner.preserve_history.load(Ordering::Relaxed)
+    }
+
+    pub fn set_preserve_history(&self, preserve_history: bool) {
+        self.inner
+            .preserve_history
+            .store(preserve_history, Ordering::Relaxed)
     }
 
     pub fn run_reader_task(
@@ -167,8 +196,11 @@ impl SerialController {
                 println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
 
                 let _ = self.inner.serial_read_tx.send(read_buf[..amt].to_vec());
-                let mut history = self.inner.history.lock().await;
-                history.push_slice_overwrite(&read_buf[..amt]);
+
+                if self.get_preserve_history() {
+                    let mut history = self.inner.history.lock().await;
+                    history.push_slice_overwrite(&read_buf[..amt]);
+                }
             }
 
             Err(e) if e.kind() != ErrorKind::WouldBlock => {
