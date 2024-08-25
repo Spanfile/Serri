@@ -247,6 +247,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-utils"
+version = "0.8.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
+
+[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -789,6 +795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ringbuf"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46f7f1b88601a8ee13cabf203611ccdf64345dc1c5d24de8b11e1a678ee619b6"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -901,9 +916,9 @@ dependencies = [
  "askama",
  "askama_axum",
  "axum",
- "futures-util",
  "mio 0.8.11",
  "mio-serial",
+ "ringbuf",
  "serde",
  "serialport",
  "thiserror",

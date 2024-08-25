@@ -8,18 +8,23 @@ use tower_http::services::ServeDir;
 
 use crate::{
     config::SerriConfig,
+    serial_controller::SerialController,
     web::template::{BaseTemplate, ConfigTemplate, IndexTemplate, NotFoundTemplate},
 };
 
-pub async fn run(serri_config: SerriConfig) -> anyhow::Result<()> {
+pub async fn run(
+    serri_config: SerriConfig,
+    controllers: Vec<SerialController>,
+) -> anyhow::Result<()> {
     let serri_config = Arc::new(serri_config);
     let app = Router::new()
         .route("/", routing::get(root))
         .route("/config", routing::get(config))
-        .nest("/device", device::router()?)
+        .nest("/device", device::router())
         .nest_service("/dist", ServeDir::new("dist"))
         .fallback(not_found)
-        .layer(Extension(Arc::clone(&serri_config)));
+        .layer(Extension(Arc::clone(&serri_config)))
+        .layer(Extension(Arc::new(controllers)));
 
     let listener = tokio::net::TcpListener::bind(serri_config.listen).await?;
     axum::serve(listener, app).await?;
