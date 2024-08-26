@@ -77,8 +77,7 @@
 
                             <div class="col-auto">
                                 <button class="btn btn-primary" type="button"
-                                        id="btnApplyTerminalSize">
-                                    Apply
+                                        id="btnApplyTerminalSize">Apply
                                 </button>
                             </div>
                         </div>
@@ -126,7 +125,9 @@
         </div>
     </div>
 
-    <button class="btn btn-primary" type="button">Pop-out</button>
+    {% if !is_popout %}
+    <button id="btnPopout" class="btn btn-primary" type="button">Pop-out</button>
+    {% endif %}
 </div>
 
 <link href="/dist/device.css" rel="stylesheet">

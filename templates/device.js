@@ -126,6 +126,13 @@ document.getElementById("checkPreserveHistory").oninput = async (ev) => {
   console.log(response.status)
 }
 
+const btnPopout = document.getElementById("btnPopout")
+if (btnPopout != null) {
+  btnPopout.onclick = (ev) => {
+    window.open(window.location.pathname + "?p=true", "Serri", "menubar=no,toolbar=no,location=no")
+  }
+}
+
 // TODO: debounce
 window.onresize = (ev) => {
   if (document.getElementById("checkAutoResize").checked) {
