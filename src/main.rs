@@ -20,19 +20,20 @@ async fn main() -> anyhow::Result<()> {
     let (serial_reader_handle, registry, event_tx) = serial_controller::create_serial_reader();
     let cancellation_token = CancellationToken::new();
 
-    let mut controller_handles = Vec::new();
     let mut controllers = Vec::new();
+    let mut controller_handles = Vec::new();
 
     for (index, port_config) in serri_config.serial_port.iter().enumerate() {
         let token = Token(index);
         let controller =
-            SerialController::new(port_config, &serri_config, token, registry.try_clone()?)?;
+            SerialController::new(port_config, &serri_config, token, registry.try_clone()?);
 
-        let controller_handle =
-            controller.run_reader_task(event_tx.subscribe(), cancellation_token.clone());
+        let controller_handle = controller
+            .run_reader_task(event_tx.subscribe(), cancellation_token.clone())
+            .await;
 
-        controller_handles.push(controller_handle);
         controllers.push(controller);
+        controller_handles.insert(index, controller_handle);
     }
 
     web::run(serri_config, controllers).await?;

@@ -34,14 +34,26 @@ struct SerialControllerRef {
     token: Token,
     registry: Registry,
 
-    serial_reader: Mutex<BufReader<SerialStream>>,
+    serial_reader: Mutex<Option<BufReader<SerialStream>>>,
     read_buffer_size: usize,
     history: Mutex<HeapRb<u8>>,
     preserve_history: AtomicBool,
 
-    serial_read_tx: broadcast::Sender<Vec<u8>>,
+    serial_read_tx: broadcast::Sender<SerialReadData>,
     serial_write_tx: mpsc::Sender<Vec<u8>>,
     serial_write_rx: Mutex<mpsc::Receiver<Vec<u8>>>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum SerialReadEvent {
+    Ready(Token),
+    Error(Token),
+}
+
+#[derive(Debug, Clone)]
+pub enum SerialReadData {
+    Data(Vec<u8>),
+    Error,
 }
 
 impl SerialController {
@@ -50,14 +62,7 @@ impl SerialController {
         serri_config: &SerriConfig,
         token: Token,
         registry: Registry,
-    ) -> anyhow::Result<Self> {
-        let mut serial_port = port_config.serial_device.open()?;
-
-        registry
-            .register(&mut serial_port, token, Interest::READABLE)
-            .expect("failed to register serial stream for polling");
-
-        let serial_reader = BufReader::new(serial_port);
+    ) -> Self {
         let read_buffer_size = port_config
             .read_buffer_size
             .or(serri_config.default_read_buffer_size)
@@ -74,10 +79,25 @@ impl SerialController {
             .or(serri_config.preserve_history)
             .unwrap_or(DEFAULT_PRESERVE_HISTORY);
 
-        let (serial_read_tx, _) = broadcast::channel::<Vec<u8>>(32);
-        let (serial_write_tx, serial_write_rx) = mpsc::channel::<Vec<u8>>(32);
+        let (serial_read_tx, _) = broadcast::channel(32);
+        let (serial_write_tx, serial_write_rx) = mpsc::channel(32);
 
-        Ok(Self {
+        let serial_reader = match port_config.serial_device.open() {
+            Ok(mut serial_port) => {
+                registry
+                    .register(&mut serial_port, token, Interest::READABLE)
+                    .expect("failed to register serial stream for polling");
+
+                Some(BufReader::new(serial_port))
+            }
+
+            Err(e) => {
+                println!("Failed to open serial device: {e:?}");
+                None
+            }
+        };
+
+        Self {
             inner: Arc::new(SerialControllerRef {
                 token,
                 registry,
@@ -89,10 +109,32 @@ impl SerialController {
                 serial_write_tx,
                 serial_write_rx: Mutex::new(serial_write_rx),
             }),
-        })
+        }
     }
 
-    pub fn subscribe_serial_read(&self) -> broadcast::Receiver<Vec<u8>> {
+    pub async fn reopen_serial_device(
+        &self,
+        port_config: &SerialPortConfig,
+        token: Token,
+    ) -> anyhow::Result<()> {
+        let mut serial_port = port_config.serial_device.open()?;
+        self.inner
+            .registry
+            .register(&mut serial_port, token, Interest::READABLE)
+            .expect("failed to register serial stream for polling");
+
+        let mut serial_reader = self.inner.serial_reader.lock().await;
+        *serial_reader = Some(BufReader::new(serial_port));
+
+        Ok(())
+    }
+
+    pub async fn is_serial_device_open(&self) -> bool {
+        let serial_device = self.inner.serial_reader.lock().await;
+        serial_device.is_some()
+    }
+
+    pub fn get_serial_read_rx(&self) -> broadcast::Receiver<SerialReadData> {
         self.inner.serial_read_tx.subscribe()
     }
 
@@ -127,9 +169,9 @@ impl SerialController {
             .store(preserve_history, Ordering::Relaxed)
     }
 
-    pub fn run_reader_task(
+    pub async fn run_reader_task(
         &self,
-        event_rx: broadcast::Receiver<Token>,
+        event_rx: broadcast::Receiver<SerialReadEvent>,
         cancellation_token: CancellationToken,
     ) -> JoinHandle<()> {
         let mut this = Self {
@@ -143,7 +185,7 @@ impl SerialController {
 
     async fn reader_task(
         &mut self,
-        mut event_rx: broadcast::Receiver<Token>,
+        mut event_rx: broadcast::Receiver<SerialReadEvent>,
         cancellation_token: CancellationToken,
     ) {
         let mut serial_write_rx = self.inner.serial_write_rx.lock().await;
@@ -152,32 +194,41 @@ impl SerialController {
             tokio::select! {
                 _ = cancellation_token.cancelled() => break,
 
+                // if read/write fails, close the serial device *but* leave this task running, since
+                // the device can be reopened later and this task will continue processing it
                 rx_event = event_rx.recv() => if let Err(e) = self.process_read_event(rx_event).await {
-                    println!("{e:?}");
-                    break;
+                    println!("Read event error: {e:?}");
+                    self.close_serial_device().await;
                 },
 
                 incoming_write = serial_write_rx.recv() => if let Err(e) = self.process_write(incoming_write).await {
-                    println!("{e:?}");
-                    break;
+                    println!("Incoming write error: {e:?}");
+                    self.close_serial_device().await;
                 }
             }
         }
 
-        let mut serial_reader = self.inner.serial_reader.lock().await;
-        self.inner
-            .registry
-            .deregister(serial_reader.get_mut())
-            .expect("failed to deregister serial stream from polling");
+        println!("Serial reader task closing");
+        self.close_serial_device().await;
     }
 
-    async fn process_read_event(&self, rx_event: Result<Token, RecvError>) -> anyhow::Result<()> {
+    async fn process_read_event(
+        &self,
+        rx_event: Result<SerialReadEvent, RecvError>,
+    ) -> anyhow::Result<()> {
         match rx_event {
-            Ok(recv_token) if recv_token == self.inner.token => self.read_serial().await?,
+            Ok(SerialReadEvent::Ready(token)) if token == self.inner.token => {
+                self.read_serial().await?
+            }
+
+            Ok(SerialReadEvent::Error(token)) if token == self.inner.token => {
+                let _ = self.inner.serial_read_tx.send(SerialReadData::Error);
+                return Err(anyhow!("Serial device returned error"));
+            }
+
             Ok(_) => (),
 
             Err(RecvError::Lagged(lag)) => println!("Event channel lagged by {lag} messages"),
-
             Err(e) => {
                 println!("Event channel closed");
                 return Err(e.into());
@@ -189,13 +240,20 @@ impl SerialController {
 
     async fn read_serial(&self) -> anyhow::Result<()> {
         let mut serial_reader = self.inner.serial_reader.lock().await;
+        let Some(serial_reader) = serial_reader.as_mut() else {
+            return Err(anyhow!("Serial device not open"));
+        };
+
         let mut read_buf = vec![0u8; self.inner.read_buffer_size];
 
         match serial_reader.read_up_to(&mut read_buf) {
             Ok(amt) if amt > 0 => {
                 println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
 
-                let _ = self.inner.serial_read_tx.send(read_buf[..amt].to_vec());
+                let _ = self
+                    .inner
+                    .serial_read_tx
+                    .send(SerialReadData::Data(read_buf[..amt].to_vec()));
 
                 if self.get_preserve_history() {
                     let mut history = self.inner.history.lock().await;
@@ -220,15 +278,32 @@ impl SerialController {
         };
 
         let mut serial_reader = self.inner.serial_reader.lock().await;
+        let Some(serial_reader) = serial_reader.as_mut() else {
+            return Err(anyhow!("Serial device not open"));
+        };
+
         serial_reader.get_mut().write_all(&data)?;
         Ok(())
+    }
+
+    async fn close_serial_device(&self) {
+        let mut serial_reader = self.inner.serial_reader.lock().await;
+        let Some(mut serial_reader) = serial_reader.take() else {
+            println!("Serial device not open");
+            return;
+        };
+
+        self.inner
+            .registry
+            .deregister(serial_reader.get_mut())
+            .expect("failed to deregister serial stream from polling");
     }
 }
 
 pub fn create_serial_reader() -> (
     std::thread::JoinHandle<()>,
     Registry,
-    broadcast::Sender<Token>,
+    broadcast::Sender<SerialReadEvent>,
 ) {
     let poll = Poll::new().expect("failed to create poller");
     let registry = poll
@@ -243,14 +318,20 @@ pub fn create_serial_reader() -> (
     (handle, registry, event_tx)
 }
 
-fn serial_reader_thread(mut poll: Poll, event_tx: broadcast::Sender<Token>) {
+fn serial_reader_thread(mut poll: Poll, event_tx: broadcast::Sender<SerialReadEvent>) {
     let mut events = Events::with_capacity(1024);
     loop {
         poll.poll(&mut events, None)
             .expect("failed to poll serial devices");
 
         for event in events.iter() {
-            let _ = event_tx.send(event.token());
+            // println!("{event:?}");
+
+            if !event.is_error() {
+                let _ = event_tx.send(SerialReadEvent::Ready(event.token()));
+            } else {
+                let _ = event_tx.send(SerialReadEvent::Error(event.token()));
+            }
         }
     }
 }

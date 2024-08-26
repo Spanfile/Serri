@@ -1,22 +1,24 @@
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use askama_axum::{IntoResponse, Response};
 use axum::{
     extract::{
-        ws::{Message, WebSocket},
+        ws::{close_code, CloseFrame, Message, WebSocket},
         Path, WebSocketUpgrade,
     },
     http::StatusCode,
     response::Redirect,
     routing, Extension, Json, Router,
 };
+use mio::Token;
 use serde::{Deserialize, Serialize};
 use tinytemplate::TinyTemplate;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     config::{SerialPortConfig, SerriConfig},
-    serial_controller::SerialController,
+    serial_controller::{SerialController, SerialReadData},
     web::template::{BaseTemplate, DeviceTemplate, IndexTemplate},
 };
 
@@ -123,7 +125,30 @@ async fn get_device_ws(
         };
 
         let serial_controller = &controllers[device_index];
-        let serial_read_rx = serial_controller.subscribe_serial_read();
+
+        if !serial_controller.is_serial_device_open().await {
+            println!("Serial device not open, trying to open...");
+
+            if let Err(e) = serial_controller
+                .reopen_serial_device(port_config, Token(device_index))
+                .await
+            {
+                println!("Couldn't open serial device: {e:?}");
+
+                let _ = socket
+                    .send(Message::Close(Some(CloseFrame {
+                        code: close_code::ERROR,
+                        reason: format!("Couldn't open serial device: {e:?}").into(),
+                    })))
+                    .await;
+
+                return;
+            };
+
+            println!("Serial device reopened");
+        }
+
+        let serial_read_rx = serial_controller.get_serial_read_rx();
         let serial_write_tx = serial_controller.get_serial_write_tx();
         let history = serial_controller.get_history().await;
 
@@ -143,7 +168,7 @@ async fn get_device_ws(
 
 async fn handle_device_ws(
     mut socket: WebSocket,
-    mut serial_read_rx: broadcast::Receiver<Vec<u8>>,
+    mut serial_read_rx: broadcast::Receiver<SerialReadData>,
     mut serial_write_tx: mpsc::Sender<Vec<u8>>,
 ) {
     // TODO: websocket pings?
@@ -151,12 +176,13 @@ async fn handle_device_ws(
     loop {
         // println!("Main loop");
         tokio::select! {
-            ws_msg = socket.recv() => if !process_ws_message(ws_msg, &mut serial_write_tx).await {
+            ws_msg = socket.recv() => if let Err(e) = process_ws_message(ws_msg, &mut serial_write_tx).await {
+                println!("Failed to process WebSocket message: {e:?}");
                 break;
             },
 
             serial_read = serial_read_rx.recv() => if let Err(e) = process_serial_read(serial_read, &mut socket).await {
-                println!("Failed to process serial read: {e:?}");
+                println!("Failed to process serial read event: {e:?}");
                 break;
             }
         }
@@ -203,43 +229,48 @@ fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Resul
 async fn process_ws_message(
     ws_msg: Option<Result<Message, axum::Error>>,
     serial_write_tx: &mut mpsc::Sender<Vec<u8>>,
-) -> bool {
+) -> anyhow::Result<()> {
     let Some(Ok(msg)) = ws_msg else {
         println!("WS client disconnected");
-        return false;
+        return Err(anyhow!("WebSocket client disconnected"));
     };
 
     // println!("{msg:?}");
 
     match msg {
-        Message::Text(text) => {
-            if serial_write_tx
-                .send(text.as_bytes().to_vec())
-                .await
-                .is_err()
-            {
-                println!("Serial TX channel closed",);
-                return false;
-            }
-        }
-
+        Message::Text(text) => serial_write_tx.send(text.as_bytes().to_vec()).await?,
         Message::Close(close_frame) => {
             println!("WS client closed connection {close_frame:?}");
-            return false;
+            return Err(anyhow!(
+                "WebSocket client closed connection: {close_frame:?}"
+            ));
         }
 
         _ => println!("Unhandled WS message: {msg:?}"),
     }
 
-    true
+    Ok(())
 }
 
 async fn process_serial_read(
-    serial_read: Result<Vec<u8>, broadcast::error::RecvError>,
+    serial_read: Result<SerialReadData, broadcast::error::RecvError>,
     socket: &mut WebSocket,
 ) -> anyhow::Result<()> {
     let serial_read = serial_read?;
-    socket.send(serial_read.into()).await?;
+
+    match serial_read {
+        SerialReadData::Data(data) => socket.send(data.into()).await?,
+        SerialReadData::Error => {
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: close_code::ERROR,
+                    reason: "Serial device returned error".into(),
+                })))
+                .await;
+
+            return Err(anyhow!("Serial device returned error"));
+        }
+    }
 
     Ok(())
 }

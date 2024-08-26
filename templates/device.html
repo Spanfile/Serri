@@ -1,85 +1,129 @@
 {% extends "index.html" %}
 {% block device %}
-<div class="col-lg p-3 justify-content-center">
+<div class="col-xl pt-3">
     <div id="wsAlertPlaceholder"></div>
     <div class="d-inline-block" id="terminal"></div>
 </div>
 
-<div class="col-lg p-3">
-    <table class="table">
-        {% let port = serri_config.serial_port[
-        active_device_index.expect("active device not set for device template")
-        ] %}
-        <tbody>
-        <tr>
-            <th scope="row" class="text-nowrap">Device</th>
-            <td><small>{{ port.serial_device.device }}</small></td>
-        </tr>
-        <tr>
-            <th scope="row" class="text-nowrap">Baud rate</th>
-            <td><small>{{ port.serial_device.baud_rate }}</small></td>
-        </tr>
-        <tr>
-            <th scope="row" class="text-nowrap">Data bits</th>
-            <td><small>{{ port.serial_device.serial_params.data_bits }}</small></td>
-        </tr>
-        <tr>
-            <th scope="row" class="text-nowrap">Parity</th>
-            <td><small>{{ port.serial_device.serial_params.parity }}</small></td>
-        </tr>
-        <tr>
-            <th scope="row" class="text-nowrap">Stop bits</th>
-            <td><small>{{ port.serial_device.serial_params.stop_bits }}</small></td>
-        </tr>
-        <tr>
-            <th scope="row" class="text-nowrap">Flow control</th>
-            <td><small>{{ port.serial_device.serial_params.flow_control }}</small></td>
-        </tr>
-        </tbody>
-    </table>
+<div class="col-xl pt-3">
+    <div class="accordion mb-3">
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#collapseParams">Serial device parameters
+                </button>
+            </h2>
 
-    <label class="form-label">Terminal size</label>
-    <div class="row g-3 mb-3 align-items-center">
-        <div class="col">
-            <label class="visually-hidden" for="numTerminalColumns">Columns</label>
-            <input type="number" class="form-control" id="numTerminalColumns" placeholder="80">
+            <div id="collapseParams" class="accordion-collapse collapse">
+                <div class="accordion-body">
+                    <table class="table">
+                        {% let port = serri_config.serial_port[
+                        active_device_index.expect("active device not set for device template")
+                        ] %}
+                        <tbody>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Device</th>
+                            <td><small>{{ port.serial_device.device }}</small></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Baud rate</th>
+                            <td><small>{{ port.serial_device.baud_rate }}</small></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Data bits</th>
+                            <td><small>{{ port.serial_device.serial_params.data_bits }}</small></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Parity</th>
+                            <td><small>{{ port.serial_device.serial_params.parity }}</small></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Stop bits</th>
+                            <td><small>{{ port.serial_device.serial_params.stop_bits }}</small></td>
+                        </tr>
+                        <tr>
+                            <th scope="row" class="text-nowrap">Flow control</th>
+                            <td><small>{{ port.serial_device.serial_params.flow_control }}</small>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div class="col-auto">by</div>
-        <div class="col">
-            <label class="visually-hidden" for="numTerminalRows">Rows</label>
-            <input type="number" class="form-control" id="numTerminalRows" placeholder="24">
+
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#collapseSettings">Terminal settings
+                </button>
+            </h2>
+
+            <div id="collapseSettings" class="accordion-collapse collapse show">
+                <div class="accordion-body">
+                    <label class="form-label">Terminal size</label>
+                    <div class="row g-3 mb-3 align-items-center">
+                        <div class="col">
+                            <label class="visually-hidden" for="numTerminalColumns">Columns</label>
+                            <input type="number" class="form-control" id="numTerminalColumns"
+                                   placeholder="80">
+                        </div>
+                        <div class="col-auto">by</div>
+                        <div class="col">
+                            <label class="visually-hidden" for="numTerminalRows">Rows</label>
+                            <input type="number" class="form-control" id="numTerminalRows"
+                                   placeholder="24">
+                        </div>
+
+                        <div class="col-auto">
+                            <button class="btn btn-primary" type="button" id="btnApplyTerminalSize">
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="checkAutoResize">
+                        <label class="form-check-label" for="checkAutoResize">
+                            Auto-resize terminal
+                        </label>
+                    </div>
+                    <div class="form-text mb-3">
+                        Automatically resize terminal to fit screen.
+                    </div>
+
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="checkLocalEcho">
+                        <label class="form-check-label" for="checkLocalEcho">
+                            Local echo
+                        </label>
+                    </div>
+                    <div class="form-text mb-3">
+                        Print input locally to the terminal.
+                    </div>
+
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="checkPreserveHistory"
+                               {% if preserve_history %} checked {% endif %}>
+                        <label class="form-check-label" for="checkPreserveHistory">
+                            Preserve history
+                        </label>
+                    </div>
+                    <div class="form-text mb-3">
+                        Preserve serial console history.
+                    </div>
+
+                    <button id="btnClearHistory" class="btn btn-secondary" type="button">Clear
+                        history
+                    </button>
+                </div>
+            </div>
         </div>
-
-        <div class="col-auto">
-            <button class="btn btn-primary" type="button" id="btnApplyTerminalSize">Apply</button>
-        </div>
     </div>
 
-    <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" role="switch" id="checkAutoResize">
-        <label class="form-check-label" for="checkAutoResize">
-            Auto-resize terminal
-        </label>
-    </div>
-    <div class="form-text mb-3">
-        Automatically resize terminal to fit screen.
-    </div>
-
-    <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" role="switch"
-               id="checkPreserveHistory"
-               {% if preserve_history %} checked {% endif %}>
-        <label class="form-check-label" for="checkPreserveHistory">
-            Preserve history
-        </label>
-    </div>
-    <div class="form-text mb-3">
-        Preserve serial console history.
-    </div>
-
-    <button id="btnClearHistory" class="btn btn-secondary" type="button">Clear history</button>
-
-    <hr>
     <button class="btn btn-primary" type="button">Pop-out</button>
 </div>
 
@@ -94,5 +138,5 @@
     alertPlaceholder.append(alert)
   }
 </script>
-<script src="/dist/device.js" type="module"></script>
+<script src="/dist/device.js"></script>
 {% endblock %}
