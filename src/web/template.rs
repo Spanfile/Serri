@@ -32,6 +32,10 @@ pub struct DeviceTemplate {
 }
 
 #[derive(Template)]
+#[template(path = "device_popout.html")]
+pub struct DevicePopoutTemplate(pub DeviceTemplate);
+
+#[derive(Template)]
 #[template(path = "config.html")]
 pub struct ConfigTemplate {
     pub base_template: BaseTemplate,
@@ -58,6 +62,14 @@ impl Deref for DeviceTemplate {
 
     fn deref(&self) -> &Self::Target {
         &self.index_template
+    }
+}
+
+impl Deref for DevicePopoutTemplate {
+    type Target = DeviceTemplate;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

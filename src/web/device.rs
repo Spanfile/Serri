@@ -5,7 +5,7 @@ use askama_axum::{IntoResponse, Response};
 use axum::{
     extract::{
         ws::{close_code, CloseFrame, Message, WebSocket},
-        Path, State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
     },
     http::StatusCode,
     response::Redirect,
@@ -20,10 +20,10 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{
     config::{SerialPortConfig, SerriConfig},
     serial_controller::{SerialController, SerialReadData},
-    web::template::{BaseTemplate, DeviceTemplate, IndexTemplate},
+    web::template::{BaseTemplate, DevicePopoutTemplate, DeviceTemplate, IndexTemplate},
 };
 
-const BANNER_TEMPLATE_NAME: &'static str = "banner";
+const BANNER_TEMPLATE_NAME: &str = "banner";
 
 #[derive(Serialize)]
 struct BannerContext<'a> {
@@ -67,8 +67,15 @@ pub fn router() -> Router {
         })
 }
 
+#[derive(Deserialize)]
+struct DeviceQuery {
+    #[serde(default, rename = "p")]
+    popout: bool,
+}
+
 async fn get_device(
     Path(device_index): Path<usize>,
+    Query(query): Query<DeviceQuery>,
     Extension(serri_config): Extension<Arc<SerriConfig>>,
     Extension(controllers): Extension<Arc<Vec<SerialController>>>,
 ) -> Response {
@@ -77,8 +84,7 @@ async fn get_device(
     }
 
     let controller = &controllers[device_index];
-
-    DeviceTemplate {
+    let device_template = DeviceTemplate {
         index_template: IndexTemplate {
             base_template: BaseTemplate {
                 serri_config,
@@ -87,8 +93,13 @@ async fn get_device(
             active_device_index: Some(device_index),
         },
         preserve_history: controller.get_preserve_history(),
+    };
+
+    if !query.popout {
+        device_template.into_response()
+    } else {
+        DevicePopoutTemplate(device_template).into_response()
     }
-    .into_response()
 }
 
 async fn post_clear_history(
