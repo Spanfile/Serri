@@ -5,12 +5,13 @@ use askama_axum::{IntoResponse, Response};
 use axum::{
     extract::{
         ws::{close_code, CloseFrame, Message, WebSocket},
-        Path, WebSocketUpgrade,
+        Path, State, WebSocketUpgrade,
     },
     http::StatusCode,
     response::Redirect,
     routing, Extension, Json, Router,
 };
+use dashmap::DashMap;
 use mio::Token;
 use serde::{Deserialize, Serialize};
 use tinytemplate::TinyTemplate;
@@ -22,6 +23,8 @@ use crate::{
     web::template::{BaseTemplate, DeviceTemplate, IndexTemplate},
 };
 
+const BANNER_TEMPLATE_NAME: &'static str = "banner";
+
 #[derive(Serialize)]
 struct BannerContext<'a> {
     device: &'a str,
@@ -30,6 +33,16 @@ struct BannerContext<'a> {
 #[derive(Deserialize, Serialize)]
 struct PreserveHistoryBody {
     preserve_history: bool,
+}
+
+#[derive(Serialize)]
+struct ActiveConnections {
+    active_connections: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveConnectionsState {
+    active_connections: Arc<DashMap<usize, usize>>,
 }
 
 pub fn router() -> Router {
@@ -45,6 +58,13 @@ pub fn router() -> Router {
             "/:device_index/preserve_history",
             routing::get(get_preserve_history).post(post_preserve_history),
         )
+        .route(
+            "/:device_index/active_connections",
+            routing::get(get_active_connections),
+        )
+        .with_state(ActiveConnectionsState {
+            active_connections: Arc::new(DashMap::new()),
+        })
 }
 
 async fn get_device(
@@ -111,11 +131,21 @@ async fn post_preserve_history(
     StatusCode::OK
 }
 
+async fn get_active_connections(
+    Path(device_index): Path<usize>,
+    State(state): State<ActiveConnectionsState>,
+) -> Json<ActiveConnections> {
+    Json(ActiveConnections {
+        active_connections: *state.active_connections.entry(device_index).or_default(),
+    })
+}
+
 async fn get_device_ws(
     Path(device_index): Path<usize>,
     ws: WebSocketUpgrade,
     Extension(serri_config): Extension<Arc<SerriConfig>>,
     Extension(controllers): Extension<Arc<Vec<SerialController>>>,
+    State(state): State<ActiveConnectionsState>,
 ) -> Response {
     println!("New WS connection for device {device_index}");
 
@@ -162,7 +192,12 @@ async fn get_device_ws(
             return;
         }
 
-        handle_device_ws(socket, serial_read_rx, serial_write_tx).await
+        *state.active_connections.entry(device_index).or_default() += 1;
+        handle_device_ws(socket, serial_read_rx, serial_write_tx).await;
+
+        // technically this could panic with an underflow if for whatever reason the entry
+        // disappears before this is called
+        *state.active_connections.entry(device_index).or_default() -= 1;
     })
 }
 
@@ -220,9 +255,9 @@ fn create_banner_context(port_config: &SerialPortConfig) -> BannerContext {
 
 fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Result<String> {
     let mut template_renderer = TinyTemplate::new();
-    template_renderer.add_template("banner", banner)?;
+    template_renderer.add_template(BANNER_TEMPLATE_NAME, banner)?;
 
-    let rendered = template_renderer.render("banner", &context)?;
+    let rendered = template_renderer.render(BANNER_TEMPLATE_NAME, &context)?;
     Ok(rendered)
 }
 

@@ -23,6 +23,7 @@ ringbuf = "0.4.4"
 
 mio = { version = "1.0.2", features = ["os-ext", "os-poll"] }
 mio-serial = { path = "../mio-serial" }
+dashmap = "6.0.1"
 
 [workspace.metadata.cross.target.aarch64-unknown-linux-gnu]
 pre-build = [

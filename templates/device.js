@@ -14,9 +14,23 @@ ws.onerror = (ev) => {
   console.log(ev)
 }
 
-ws.onopen = (_) => {
+ws.onopen = async (_) => {
   const attachAddon = new AttachAddon(ws)
   term.loadAddon(attachAddon)
+
+  const response = await fetch(window.location + "/active_connections")
+  const json = await response.json()
+
+  console.log(json)
+  const active_connections = json["active_connections"]
+
+  if (active_connections > 1) {
+    if (active_connections === 2) {
+      appendWsAlert("There is 1 other active connection to this device")
+    } else {
+      appendWsAlert(`There are ${active_connections - 1} other active connections to this device`)
+    }
+  }
 }
 
 ws.onclose = (ev) => {
