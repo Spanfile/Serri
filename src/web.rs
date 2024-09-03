@@ -4,7 +4,8 @@ mod template;
 use std::sync::Arc;
 
 use axum::{http::StatusCode, response::IntoResponse, routing, Extension, Router};
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
+use tracing::info;
 
 use crate::{
     config::SerriConfig,
@@ -24,10 +25,15 @@ pub async fn run(
         .nest_service("/dist", ServeDir::new("dist"))
         .fallback(not_found)
         .layer(Extension(Arc::clone(&serri_config)))
-        .layer(Extension(Arc::new(controllers)));
+        .layer(Extension(Arc::new(controllers)))
+        .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(serri_config.listen).await?;
-    axum::serve(listener, app).await?;
+    info!("Serving web on {}", serri_config.listen);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(super::shutdown_signal())
+        .await?;
 
     Ok(())
 }

@@ -1,5 +1,7 @@
 use std::io::{BufRead, ErrorKind};
 
+use tracing::trace;
+
 pub trait ReadUpTo: BufRead {
     fn read_up_to(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
 }
@@ -17,7 +19,10 @@ impl<B: BufRead> ReadUpTo for B {
             }
 
             let read = match self.fill_buf() {
-                Ok(read) => read,
+                Ok(read) if !read.is_empty() => read,
+                // i guess it's possible for the read to return nothing so return early if so
+                Ok(_) => return Ok(total),
+
                 Err(e) if timed_out_or_would_block(e.kind()) => return Ok(total),
                 Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
@@ -27,7 +32,14 @@ impl<B: BufRead> ReadUpTo for B {
             let remaining = buf.len() - total; // how much space is left in the buffer
             let copy = read_len.min(remaining); // how much should be copied (and consumed)
 
-            println!("  read:{read_len} total:{total} remaining:{remaining} copy:{copy}");
+            trace!(
+                read_len,
+                total,
+                remaining,
+                copy,
+                ?read,
+                "read serial device"
+            );
 
             buf[total..total + copy].copy_from_slice(&read[..copy]);
             self.consume(copy);

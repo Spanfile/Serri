@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
 use tinytemplate::TinyTemplate;
 use tokio::sync::{broadcast, mpsc};
+use tracing::{debug, error, error_span, info, trace, warn, Instrument};
 
 use crate::{
     config::SerriConfig,
@@ -96,7 +97,7 @@ async fn post_clear_history(
         return StatusCode::NOT_FOUND;
     };
 
-    controller.clear_history().await;
+    controller.clear_history();
     StatusCode::OK
 }
 
@@ -154,56 +155,68 @@ async fn get_device_ws(
     Extension(controllers): Extension<Arc<Vec<SerialController>>>,
     State(state): State<ActiveConnectionsState>,
 ) -> Response {
-    println!("New WS connection for device {device_index}");
+    let span = error_span!("websocket", device_index);
+    let _enter = span.enter();
+    info!("New WebSocket connection");
 
-    ws.on_upgrade(move |mut socket| async move {
-        let Some(port_config) = serri_config.serial_port.get(device_index) else {
-            return;
-        };
-
-        let serial_controller = &controllers[device_index];
-
-        if !serial_controller.is_serial_device_open().await {
-            println!("Serial device not open, trying to open...");
-
-            if let Err(e) = serial_controller
-                .reopen_serial_device(port_config, Token(device_index))
-                .await
-            {
-                println!("Couldn't open serial device: {e:?}");
-
-                let _ = socket
-                    .send(Message::Close(Some(CloseFrame {
-                        code: close_code::ERROR,
-                        reason: format!("Couldn't open serial device: {e:?}").into(),
-                    })))
-                    .await;
-
+    drop(_enter);
+    ws.on_upgrade(move |mut socket| {
+        async move {
+            let Some(port_config) = serri_config.serial_port.get(device_index) else {
                 return;
             };
 
-            println!("Serial device reopened");
+            let serial_controller = &controllers[device_index];
+
+            if !serial_controller.is_serial_device_open() {
+                let span = error_span!(
+                    "serial_device_reopen",
+                    device = port_config.serial_device.device
+                );
+                let _enter = span.enter();
+
+                warn!("Serial device not open, trying to open");
+
+                if let Err(e) =
+                    serial_controller.reopen_serial_device(port_config, Token(device_index))
+                {
+                    error!("Couldn't open serial device: {e:?}");
+
+                    drop(_enter);
+                    let _ = socket
+                        .send(Message::Close(Some(CloseFrame {
+                            code: close_code::ERROR,
+                            reason: format!("Couldn't open serial device: {e:?}").into(),
+                        })))
+                        .await;
+
+                    return;
+                };
+
+                info!("Serial device reopened");
+            }
+
+            let serial_read_rx = serial_controller.get_serial_read_rx();
+            let serial_write_tx = serial_controller.get_serial_write_tx();
+            let history = serial_controller.get_history();
+
+            if let Some(banner) = serri_config.banner.as_deref()
+                && let Some(parameters) = serial_controller.get_serial_device_parameters()
+                && send_banner(&mut socket, banner, parameters).await.is_err()
+            {
+                return;
+            }
+
+            if socket.send(history.into()).await.is_err() {
+                return;
+            }
+
+            *state.active_connections.entry(device_index).or_default() += 1;
+            handle_device_ws(socket, serial_read_rx, serial_write_tx).await;
+
+            *state.active_connections.entry(device_index).or_insert(1) -= 1;
         }
-
-        let serial_read_rx = serial_controller.get_serial_read_rx();
-        let serial_write_tx = serial_controller.get_serial_write_tx();
-        let history = serial_controller.get_history().await;
-
-        if let Some(banner) = serri_config.banner.as_deref()
-            && let Some(parameters) = serial_controller.get_serial_device_parameters().await
-            && send_banner(&mut socket, banner, parameters).await.is_err()
-        {
-            return;
-        }
-
-        if socket.send(history.into()).await.is_err() {
-            return;
-        }
-
-        *state.active_connections.entry(device_index).or_default() += 1;
-        handle_device_ws(socket, serial_read_rx, serial_write_tx).await;
-
-        *state.active_connections.entry(device_index).or_insert(1) -= 1;
+        .instrument(span)
     })
 }
 
@@ -219,21 +232,21 @@ async fn handle_device_ws(
         tokio::select! {
             ws_msg = socket.recv() => {
                 if let Err(e) = process_ws_message(ws_msg, &mut serial_write_tx).await {
-                    println!("Failed to process WebSocket message: {e:?}");
+                    warn!("WebSocket terminated: {e:?}");
                     break;
                 }
             },
 
             serial_read = serial_read_rx.recv() => {
                 if let Err(e) = process_serial_read(serial_read, &mut socket).await {
-                    println!("Failed to process serial read event: {e:?}");
+                    error!("Failed to process serial read event: {e:?}");
                     break;
                 }
             }
         }
     }
 
-    println!("Closing WS");
+    info!("Closing WebSocket");
     let _ = socket.close().await;
 }
 
@@ -246,7 +259,7 @@ async fn send_banner(
     match render_banner_template(banner, banner_context) {
         Ok(rendered) => socket.send(rendered.into()).await?,
         Err(e) => {
-            println!("Failed to render banner template: {e:?}");
+            error!("Failed to render banner template: {e:?}");
 
             socket
                 .send("Failed to render banner template".into())
@@ -317,22 +330,21 @@ async fn process_ws_message(
     serial_write_tx: &mut mpsc::Sender<Vec<u8>>,
 ) -> anyhow::Result<()> {
     let Some(Ok(msg)) = ws_msg else {
-        println!("WS client disconnected");
+        warn!("WebSocket client disconnected");
         return Err(anyhow!("WebSocket client disconnected"));
     };
 
-    // println!("{msg:?}");
+    trace!(?msg);
 
     match msg {
         Message::Text(text) => serial_write_tx.send(text.as_bytes().to_vec()).await?,
-        Message::Close(close_frame) => {
-            println!("WS client closed connection {close_frame:?}");
-            return Err(anyhow!(
-                "WebSocket client closed connection: {close_frame:?}"
-            ));
+        Message::Close(None) => return Err(anyhow!("WebSocket connection closed unexpectedly")),
+        Message::Close(Some(close_frame)) => {
+            debug!(?close_frame, "WebSocket client closed connection");
+            return Err(anyhow!("WebSocket client closed connection"));
         }
 
-        _ => println!("Unhandled WS message: {msg:?}"),
+        _ => debug!(?msg, "Unhandled WebSocket message"),
     }
 
     Ok(())
@@ -343,6 +355,7 @@ async fn process_serial_read(
     socket: &mut WebSocket,
 ) -> anyhow::Result<()> {
     let serial_read = serial_read?;
+    trace!(?serial_read);
 
     match serial_read {
         SerialReadData::Data(data) => socket.send(data.into()).await?,

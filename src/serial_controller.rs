@@ -12,10 +12,11 @@ use mio_serial::SerialStream;
 use ringbuf::{traits::*, HeapRb};
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use tokio::{
-    sync::{broadcast, broadcast::error::RecvError, mpsc, Mutex},
+    sync::{broadcast, broadcast::error::RecvError, mpsc},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, error_span, info, trace, warn, Instrument};
 
 use crate::{
     config::{SerialPortConfig, SerriConfig},
@@ -34,13 +35,13 @@ struct SerialControllerRef {
     token: Token,
     registry: Registry,
 
-    serial_reader: Mutex<Option<BufReader<SerialStream>>>,
-    history: Mutex<HeapRb<u8>>,
+    serial_reader: std::sync::Mutex<Option<BufReader<SerialStream>>>,
+    history: std::sync::Mutex<HeapRb<u8>>,
     preserve_history: AtomicBool,
 
     serial_read_tx: broadcast::Sender<SerialReadData>,
     serial_write_tx: mpsc::Sender<Vec<u8>>,
-    serial_write_rx: Mutex<mpsc::Receiver<Vec<u8>>>,
+    serial_write_rx: tokio::sync::Mutex<mpsc::Receiver<Vec<u8>>>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -86,7 +87,7 @@ impl SerialController {
             }
 
             Err(e) => {
-                println!("Failed to open serial device: {e:?}");
+                error!("Failed to open serial device: {e:?}");
                 None
             }
         };
@@ -95,17 +96,17 @@ impl SerialController {
             inner: Arc::new(SerialControllerRef {
                 token,
                 registry,
-                serial_reader: Mutex::new(serial_reader),
-                history: Mutex::new(HeapRb::new(history_size)),
+                serial_reader: std::sync::Mutex::new(serial_reader),
+                history: std::sync::Mutex::new(HeapRb::new(history_size)),
                 preserve_history: AtomicBool::new(preserve_history),
                 serial_read_tx,
                 serial_write_tx,
-                serial_write_rx: Mutex::new(serial_write_rx),
+                serial_write_rx: tokio::sync::Mutex::new(serial_write_rx),
             }),
         }
     }
 
-    pub async fn reopen_serial_device(
+    pub fn reopen_serial_device(
         &self,
         port_config: &SerialPortConfig,
         token: Token,
@@ -116,21 +117,35 @@ impl SerialController {
             .register(&mut serial_port, token, Interest::READABLE)
             .expect("failed to register serial stream for polling");
 
-        let mut serial_reader = self.inner.serial_reader.lock().await;
-        *serial_reader = Some(BufReader::new(serial_port));
+        let mut serial_reader = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
 
+        *serial_reader = Some(BufReader::new(serial_port));
         Ok(())
     }
 
-    pub async fn is_serial_device_open(&self) -> bool {
-        let serial_device = self.inner.serial_reader.lock().await;
+    pub fn is_serial_device_open(&self) -> bool {
+        let serial_device = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
+
         serial_device.is_some()
     }
 
-    pub async fn get_serial_device_parameters(
+    pub fn get_serial_device_parameters(
         &self,
     ) -> Option<(String, u32, DataBits, Parity, StopBits, FlowControl)> {
-        let serial_device = self.inner.serial_reader.lock().await;
+        let serial_device = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
+
         let serial_device = serial_device.as_ref()?;
         let serial_device = serial_device.get_ref();
 
@@ -140,6 +155,16 @@ impl SerialController {
         let parity = serial_device.parity().ok()?;
         let stop_bits = serial_device.stop_bits().ok()?;
         let flow_control = serial_device.flow_control().ok()?;
+
+        trace!(
+            device,
+            baud_rate,
+            ?data_bits,
+            ?parity,
+            ?stop_bits,
+            ?flow_control,
+            "serial device parameters"
+        );
 
         Some((
             device,
@@ -159,8 +184,13 @@ impl SerialController {
         self.inner.serial_write_tx.clone()
     }
 
-    pub async fn get_history(&self) -> Vec<u8> {
-        let history = self.inner.history.lock().await;
+    pub fn get_history(&self) -> Vec<u8> {
+        let history = self
+            .inner
+            .history
+            .lock()
+            .expect("serial device mutex poisoned");
+
         let (left, right) = history.as_slices();
 
         let mut history_vec = Vec::with_capacity(history.capacity().get());
@@ -170,10 +200,10 @@ impl SerialController {
         history_vec
     }
 
-    pub async fn clear_history(&self) {
-        let mut history = self.inner.history.lock().await;
+    pub fn clear_history(&self) {
+        let mut history = self.inner.history.lock().expect("history mutex poisoned");
         let amt = history.clear();
-        println!("Cleared {amt} bytes from history");
+        info!("Cleared {amt} bytes from history");
     }
 
     pub fn get_preserve_history(&self) -> bool {
@@ -186,7 +216,7 @@ impl SerialController {
             .store(preserve_history, Ordering::Relaxed)
     }
 
-    pub async fn run_reader_task(
+    pub fn run_reader_task(
         &self,
         event_rx: broadcast::Receiver<SerialReadEvent>,
         cancellation_token: CancellationToken,
@@ -195,8 +225,11 @@ impl SerialController {
             inner: Arc::clone(&self.inner),
         };
 
+        let span = error_span!("reader_task", token = self.inner.token.0);
         tokio::spawn(async move {
-            this.reader_task(event_rx, cancellation_token).await;
+            this.reader_task(event_rx, cancellation_token)
+                .instrument(span)
+                .await;
         })
     }
 
@@ -214,19 +247,19 @@ impl SerialController {
                 // if read/write fails, close the serial device *but* leave this task running, since
                 // the device can be reopened later and this task will continue processing it
                 rx_event = event_rx.recv() => if let Err(e) = self.process_read_event(rx_event).await {
-                    println!("Read event error: {e:?}");
-                    self.close_serial_device().await;
+                    error!("Read event error: {e:?}");
+                    self.close_serial_device();
                 },
 
-                incoming_write = serial_write_rx.recv() => if let Err(e) = self.process_write(incoming_write).await {
-                    println!("Incoming write error: {e:?}");
-                    self.close_serial_device().await;
+                incoming_write = serial_write_rx.recv() => if let Err(e) = self.process_write(incoming_write) {
+                    error!("Incoming write error: {e:?}");
+                    self.close_serial_device();
                 }
             }
         }
 
-        println!("Serial reader task closing");
-        self.close_serial_device().await;
+        debug!("Serial reader task closing");
+        self.close_serial_device();
     }
 
     async fn process_read_event(
@@ -240,14 +273,14 @@ impl SerialController {
                     return Err(anyhow!("Serial device returned error"));
                 }
 
-                self.read_serial().await?
+                self.read_serial()?
             }
 
             Ok(_) => (),
 
-            Err(RecvError::Lagged(lag)) => println!("Event channel lagged by {lag} messages"),
+            Err(RecvError::Lagged(lag)) => warn!("Event channel lagged by {lag} messages"),
             Err(e) => {
-                println!("Event channel closed");
+                error!("Event channel closed");
                 return Err(e.into());
             }
         }
@@ -255,11 +288,25 @@ impl SerialController {
         Ok(())
     }
 
-    async fn read_serial(&self) -> anyhow::Result<()> {
-        let mut serial_reader = self.inner.serial_reader.lock().await;
+    fn read_serial(&self) -> anyhow::Result<()> {
+        let mut serial_reader = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
+
         let Some(serial_reader) = serial_reader.as_mut() else {
             return Err(anyhow!("Serial device not open"));
         };
+
+        let span = error_span!(
+            "read_serial",
+            device = serial_reader
+                .get_ref()
+                .name()
+                .unwrap_or("unknown device".to_string())
+        );
+        let _enter = span.enter();
 
         // TODO: its technically possible that the serial device produces data faster than we can
         // read it, so this message will keep growing indefinitely. probably a good idea to set a
@@ -278,7 +325,7 @@ impl SerialController {
                 }
 
                 Err(e) if e.kind() != ErrorKind::WouldBlock => {
-                    println!("Failed to read from serial port: {e:?}");
+                    error!("Failed to read from serial port: {e:?}");
                     return Err(e.into());
                 }
 
@@ -287,14 +334,10 @@ impl SerialController {
             }
         }
 
-        println!(
-            "Read {} bytes from {:?}",
-            message.len(),
-            serial_reader.get_ref().name()
-        );
+        debug!(len = message.len(), "read");
 
         if self.get_preserve_history() {
-            let mut history = self.inner.history.lock().await;
+            let mut history = self.inner.history.lock().expect("history mutex poisoned");
             history.push_slice_overwrite(&message);
         }
 
@@ -306,10 +349,15 @@ impl SerialController {
         Ok(())
     }
 
-    async fn process_write(&self, data: Option<Vec<u8>>) -> anyhow::Result<()> {
+    fn process_write(&self, data: Option<Vec<u8>>) -> anyhow::Result<()> {
         let data = data.ok_or(anyhow!("Serial write channel closed"))?;
 
-        let mut serial_reader = self.inner.serial_reader.lock().await;
+        let mut serial_reader = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
+
         let serial_reader = serial_reader
             .as_mut()
             .ok_or(anyhow!("Serial device not open"))?;
@@ -318,10 +366,15 @@ impl SerialController {
         Ok(())
     }
 
-    async fn close_serial_device(&self) {
-        let mut serial_reader = self.inner.serial_reader.lock().await;
+    fn close_serial_device(&self) {
+        let mut serial_reader = self
+            .inner
+            .serial_reader
+            .lock()
+            .expect("serial device mutex poisoned");
+
         let Some(mut serial_reader) = serial_reader.take() else {
-            println!("Serial device not open");
+            warn!("Serial device not open while attempting to close device");
             return;
         };
 
