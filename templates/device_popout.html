@@ -8,9 +8,17 @@
 </head>
 <body>
 <div class="container-fluid vh-100">
-    <div class="row gx-3 h-100">
-        {% let is_popout = true %}
-        {% include "device_view.html" %}
+    <div class="d-flex flex-row h-100">
+        <div class="pt-3 pb-3 flex-grow-1 d-flex flex-column">
+            {% include "terminal.html" %}
+        </div>
+
+        <div class="ms-3 pt-3" style="max-width: 357px; min-width: 357px">
+            {% let is_popout = true %}
+            {% include "terminal_settings.html" %}
+        </div>
+
+        {% include "terminal_scripts.html" %}
     </div>
 </div>
 <script src="/dist/base.js"></script>

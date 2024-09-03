@@ -23,21 +23,15 @@ impl<B: BufRead> ReadUpTo for B {
                 Err(e) => return Err(e),
             };
 
-            let target = &mut buf[total..];
-            let amt = read.len();
-            let len = target.len();
+            let read_len = read.len(); // how much was read
+            let remaining = buf.len() - total; // how much space is left in the buffer
+            let copy = read_len.min(remaining); // how much should be copied (and consumed)
 
-            // println!("r:{amt} t:{total} l:{len}");
+            println!("  read:{read_len} total:{total} remaining:{remaining} copy:{copy}");
 
-            if amt < len {
-                target[..amt].copy_from_slice(read);
-                self.consume(amt);
-                total += amt;
-            } else {
-                target.copy_from_slice(&read[..len]);
-                self.consume(len);
-                total += len;
-            }
+            buf[total..total + copy].copy_from_slice(&read[..copy]);
+            self.consume(copy);
+            total += copy;
         }
     }
 }

@@ -14,31 +14,17 @@ use axum::{
 use dashmap::DashMap;
 use mio::Token;
 use serde::{Deserialize, Serialize};
+use serialport::{DataBits, FlowControl, Parity, StopBits};
 use tinytemplate::TinyTemplate;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
-    config::{SerialPortConfig, SerriConfig},
+    config::SerriConfig,
     serial_controller::{SerialController, SerialReadData},
     web::template::{BaseTemplate, DevicePopoutTemplate, DeviceTemplate, IndexTemplate},
 };
 
 const BANNER_TEMPLATE_NAME: &str = "banner";
-
-#[derive(Serialize)]
-struct BannerContext<'a> {
-    device: &'a str,
-}
-
-#[derive(Deserialize, Serialize)]
-struct PreserveHistoryBody {
-    preserve_history: bool,
-}
-
-#[derive(Serialize)]
-struct ActiveConnections {
-    active_connections: usize,
-}
 
 #[derive(Debug, Clone)]
 struct ActiveConnectionsState {
@@ -114,6 +100,11 @@ async fn post_clear_history(
     StatusCode::OK
 }
 
+#[derive(Deserialize, Serialize)]
+struct PreserveHistoryBody {
+    preserve_history: bool,
+}
+
 async fn get_preserve_history(
     Path(device_index): Path<usize>,
     Extension(controllers): Extension<Arc<Vec<SerialController>>>,
@@ -142,11 +133,16 @@ async fn post_preserve_history(
     StatusCode::OK
 }
 
+#[derive(Serialize)]
+struct ActiveConnectionsBody {
+    active_connections: usize,
+}
+
 async fn get_active_connections(
     Path(device_index): Path<usize>,
     State(state): State<ActiveConnectionsState>,
-) -> Json<ActiveConnections> {
-    Json(ActiveConnections {
+) -> Json<ActiveConnectionsBody> {
+    Json(ActiveConnectionsBody {
         active_connections: *state.active_connections.entry(device_index).or_default(),
     })
 }
@@ -194,10 +190,11 @@ async fn get_device_ws(
         let history = serial_controller.get_history().await;
 
         if let Some(banner) = serri_config.banner.as_deref()
-            && send_banner(&mut socket, banner, port_config).await.is_err()
+            && let Some(parameters) = serial_controller.get_serial_device_parameters().await
+            && send_banner(&mut socket, banner, parameters).await.is_err()
         {
             return;
-        };
+        }
 
         if socket.send(history.into()).await.is_err() {
             return;
@@ -206,9 +203,7 @@ async fn get_device_ws(
         *state.active_connections.entry(device_index).or_default() += 1;
         handle_device_ws(socket, serial_read_rx, serial_write_tx).await;
 
-        // technically this could panic with an underflow if for whatever reason the entry
-        // disappears before this is called
-        *state.active_connections.entry(device_index).or_default() -= 1;
+        *state.active_connections.entry(device_index).or_insert(1) -= 1;
     })
 }
 
@@ -222,14 +217,18 @@ async fn handle_device_ws(
     loop {
         // println!("Main loop");
         tokio::select! {
-            ws_msg = socket.recv() => if let Err(e) = process_ws_message(ws_msg, &mut serial_write_tx).await {
-                println!("Failed to process WebSocket message: {e:?}");
-                break;
+            ws_msg = socket.recv() => {
+                if let Err(e) = process_ws_message(ws_msg, &mut serial_write_tx).await {
+                    println!("Failed to process WebSocket message: {e:?}");
+                    break;
+                }
             },
 
-            serial_read = serial_read_rx.recv() => if let Err(e) = process_serial_read(serial_read, &mut socket).await {
-                println!("Failed to process serial read event: {e:?}");
-                break;
+            serial_read = serial_read_rx.recv() => {
+                if let Err(e) = process_serial_read(serial_read, &mut socket).await {
+                    println!("Failed to process serial read event: {e:?}");
+                    break;
+                }
             }
         }
     }
@@ -241,9 +240,9 @@ async fn handle_device_ws(
 async fn send_banner(
     socket: &mut WebSocket,
     banner: &str,
-    port_config: &SerialPortConfig,
+    parameters: (String, u32, DataBits, Parity, StopBits, FlowControl),
 ) -> anyhow::Result<()> {
-    let banner_context = create_banner_context(port_config);
+    let banner_context = create_banner_context(parameters);
     match render_banner_template(banner, banner_context) {
         Ok(rendered) => socket.send(rendered.into()).await?,
         Err(e) => {
@@ -258,10 +257,51 @@ async fn send_banner(
     Ok(())
 }
 
-fn create_banner_context(port_config: &SerialPortConfig) -> BannerContext {
+#[derive(Serialize)]
+struct BannerContext {
+    device: String,
+    short_params: String,
+
+    baud_rate: u32,
+    data_bits: DataBits,
+    parity: Parity,
+    stop_bits: StopBits,
+    flow_control: FlowControl,
+}
+
+fn create_banner_context(
+    (device, baud_rate, data_bits, parity, stop_bits, flow_control): (
+        String,
+        u32,
+        DataBits,
+        Parity,
+        StopBits,
+        FlowControl,
+    ),
+) -> BannerContext {
     BannerContext {
-        device: &port_config.serial_device.device,
+        device,
+        short_params: format_short_params(data_bits, parity, stop_bits),
+
+        baud_rate,
+        data_bits,
+        parity,
+        stop_bits,
+        flow_control,
     }
+}
+
+fn format_short_params(data_bits: DataBits, parity: Parity, stop_bits: StopBits) -> String {
+    let data_bits: u8 = data_bits.into();
+    let stop_bits: u8 = stop_bits.into();
+
+    let parity = match parity {
+        Parity::None => "N",
+        Parity::Odd => "O",
+        Parity::Even => "E",
+    };
+
+    format!("{data_bits}{parity}{stop_bits}")
 }
 
 fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Result<String> {

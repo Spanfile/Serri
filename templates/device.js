@@ -4,6 +4,11 @@ import {FitAddon} from "@xterm/addon-fit/src/FitAddon";
 
 import "@xterm/xterm/css/xterm.css"
 
+const checkAutoResize = document.getElementById("checkAutoResize")
+const terminalSizeFields = document.getElementById("terminalSizeFields")
+const numTerminalColumns = document.getElementById("numTerminalColumns")
+const numTerminalRows = document.getElementById("numTerminalRows")
+
 const term = new Terminal({
   fontFamily: "monospace"
 })
@@ -19,12 +24,13 @@ const getClampedProposedDims = () => {
 }
 
 const resizeTerminalToFit = () => {
-  const proposedDims = fitAddon.proposeDimensions()
-  const cols = proposedDims.cols > 80 ? proposedDims.cols : 80
-  const rows = proposedDims.rows > 24 ? proposedDims.rows : 24
+  const [cols, rows] = getClampedProposedDims()
 
   console.log(`auto-resizing terminal to ${cols} by ${rows}`)
   term.resize(cols, rows)
+
+  numTerminalColumns.value = cols
+  numTerminalRows.value = rows
 }
 
 const ws = new WebSocket(window.location.pathname + "/ws")
@@ -66,11 +72,12 @@ ws.onclose = (ev) => {
   }
 }
 
-term.open(document.getElementById("terminal"))
+const terminalElement = document.getElementById("terminal")
+term.open(terminalElement)
 term.loadAddon(fitAddon)
 
-document.getElementById("numTerminalColumns").value = term.options.cols
-document.getElementById("numTerminalRows").value = term.options.rows
+numTerminalColumns.value = term.options.cols
+numTerminalRows.value = term.options.rows
 
 document.getElementById("btnApplyTerminalSize").onclick = (ev) => {
   const cols = document.getElementById("numTerminalColumns").value
@@ -80,24 +87,20 @@ document.getElementById("btnApplyTerminalSize").onclick = (ev) => {
   term.resize(cols, rows)
 }
 
-document.getElementById("checkAutoResize").oninput = (ev) => {
+checkAutoResize.oninput = (ev) => {
   if (ev.target.checked) {
-    document.getElementById("terminal").classList.add("flex-grow-1")
+    terminalElement.classList.add("flex-grow-1")
 
     resizeTerminalToFit()
-    const [cols, rows] = getClampedProposedDims()
-
-    document.getElementById("terminalSizeFields").setAttribute("disabled", "")
-    document.getElementById("numTerminalColumns").value = cols
-    document.getElementById("numTerminalRows").value = rows
+    terminalSizeFields.setAttribute("disabled", "")
   } else {
-    document.getElementById("terminal").classList.remove("flex-grow-1")
+    terminalElement.classList.remove("flex-grow-1")
 
     term.resize(term.options.cols, term.options.rows)
 
-    document.getElementById("terminalSizeFields").removeAttribute("disabled")
-    document.getElementById("numTerminalColumns").value = term.options.cols
-    document.getElementById("numTerminalRows").value = term.options.rows
+    terminalSizeFields.removeAttribute("disabled")
+    numTerminalColumns.value = term.options.cols
+    numTerminalRows.value = term.options.rows
   }
 }
 
@@ -134,8 +137,12 @@ if (btnPopout != null) {
 }
 
 // TODO: debounce
-window.onresize = (ev) => {
-  if (document.getElementById("checkAutoResize").checked) {
-    resizeTerminalToFit()
+const resizeObserver = new ResizeObserver(entries => {
+  for (let entry of entries) {
+    if (checkAutoResize.checked) {
+      resizeTerminalToFit()
+    }
   }
-}
+})
+
+resizeObserver.observe(terminalElement)

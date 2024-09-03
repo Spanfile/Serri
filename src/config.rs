@@ -15,7 +15,6 @@ pub struct SerriConfig {
     pub listen: SocketAddr,
     pub banner: Option<String>,
     pub default_history_size: Option<usize>,
-    pub default_read_buffer_size: Option<usize>,
     pub preserve_history: Option<bool>,
 
     #[serde(default)]
@@ -27,7 +26,6 @@ pub struct SerialPortConfig {
     pub title: Option<String>,
     pub description: Option<String>,
     pub history_size: Option<usize>,
-    pub read_buffer_size: Option<usize>,
     pub preserve_history: Option<bool>,
 
     #[serde(flatten)]

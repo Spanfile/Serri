@@ -1,18 +1,16 @@
 listen = "0.0.0.0:8080"
-banner = "Connected to {device}"
+banner = "Connected to {device} at {baud_rate}:{short_params}"
 
 [[serial_port]]
 device = "/dev/ttyUSB0:115200"
 
 #[[serial_port]]
 #title = "9600 baud"
-#read_buffer_size = 32
 #device = "/dev/ttyUSB0:9600"
 #
 #[[serial_port]]
 #title = "300 baud"
 #description = "Serial like its a Bell 103"
-#read_buffer_size = 1
 #device = "/dev/ttyUSB0:300"
 #
 #[[serial_port]]

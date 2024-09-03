@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use mio::{Events, Interest, Poll, Registry, Token};
 use mio_serial::SerialStream;
 use ringbuf::{traits::*, HeapRb};
-use serialport::SerialPort;
+use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use tokio::{
     sync::{broadcast, broadcast::error::RecvError, mpsc, Mutex},
     task::JoinHandle,
@@ -22,8 +22,8 @@ use crate::{
     util::ReadUpTo,
 };
 
+const SERIAL_READ_BUFFER_SIZE: usize = 256;
 const DEFAULT_SERIAL_HISTORY_SIZE: usize = 100 * 1024;
-const DEFAULT_SERIAL_READ_BUFFER_SIZE: usize = 64;
 const DEFAULT_PRESERVE_HISTORY: bool = true;
 
 pub struct SerialController {
@@ -35,7 +35,6 @@ struct SerialControllerRef {
     registry: Registry,
 
     serial_reader: Mutex<Option<BufReader<SerialStream>>>,
-    read_buffer_size: usize,
     history: Mutex<HeapRb<u8>>,
     preserve_history: AtomicBool,
 
@@ -45,9 +44,9 @@ struct SerialControllerRef {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum SerialReadEvent {
-    Ready(Token),
-    Error(Token),
+pub struct SerialReadEvent {
+    pub token: Token,
+    pub is_error: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,11 +62,6 @@ impl SerialController {
         token: Token,
         registry: Registry,
     ) -> Self {
-        let read_buffer_size = port_config
-            .read_buffer_size
-            .or(serri_config.default_read_buffer_size)
-            .unwrap_or(DEFAULT_SERIAL_READ_BUFFER_SIZE);
-
         let history_size = port_config
             .history_size
             .or(serri_config.default_history_size)
@@ -102,7 +96,6 @@ impl SerialController {
                 token,
                 registry,
                 serial_reader: Mutex::new(serial_reader),
-                read_buffer_size,
                 history: Mutex::new(HeapRb::new(history_size)),
                 preserve_history: AtomicBool::new(preserve_history),
                 serial_read_tx,
@@ -132,6 +125,30 @@ impl SerialController {
     pub async fn is_serial_device_open(&self) -> bool {
         let serial_device = self.inner.serial_reader.lock().await;
         serial_device.is_some()
+    }
+
+    pub async fn get_serial_device_parameters(
+        &self,
+    ) -> Option<(String, u32, DataBits, Parity, StopBits, FlowControl)> {
+        let serial_device = self.inner.serial_reader.lock().await;
+        let serial_device = serial_device.as_ref()?;
+        let serial_device = serial_device.get_ref();
+
+        let device = serial_device.name().unwrap_or("unknown device".to_string());
+        let baud_rate = serial_device.baud_rate().ok()?;
+        let data_bits = serial_device.data_bits().ok()?;
+        let parity = serial_device.parity().ok()?;
+        let stop_bits = serial_device.stop_bits().ok()?;
+        let flow_control = serial_device.flow_control().ok()?;
+
+        Some((
+            device,
+            baud_rate,
+            data_bits,
+            parity,
+            stop_bits,
+            flow_control,
+        ))
     }
 
     pub fn get_serial_read_rx(&self) -> broadcast::Receiver<SerialReadData> {
@@ -217,13 +234,13 @@ impl SerialController {
         rx_event: Result<SerialReadEvent, RecvError>,
     ) -> anyhow::Result<()> {
         match rx_event {
-            Ok(SerialReadEvent::Ready(token)) if token == self.inner.token => {
-                self.read_serial().await?
-            }
+            Ok(SerialReadEvent { token, is_error }) if token == self.inner.token => {
+                if is_error {
+                    let _ = self.inner.serial_read_tx.send(SerialReadData::Error);
+                    return Err(anyhow!("Serial device returned error"));
+                }
 
-            Ok(SerialReadEvent::Error(token)) if token == self.inner.token => {
-                let _ = self.inner.serial_read_tx.send(SerialReadData::Error);
-                return Err(anyhow!("Serial device returned error"));
+                self.read_serial().await?
             }
 
             Ok(_) => (),
@@ -244,43 +261,58 @@ impl SerialController {
             return Err(anyhow!("Serial device not open"));
         };
 
-        let mut read_buf = vec![0u8; self.inner.read_buffer_size];
+        // TODO: its technically possible that the serial device produces data faster than we can
+        // read it, so this message will keep growing indefinitely. probably a good idea to set a
+        // maximum size?
+        let mut message = Vec::new();
+        let mut read_buf = [0u8; SERIAL_READ_BUFFER_SIZE];
 
-        match serial_reader.read_up_to(&mut read_buf) {
-            Ok(amt) if amt > 0 => {
-                println!("Read {amt} bytes from {:?}", serial_reader.get_ref().name());
+        loop {
+            match serial_reader.read_up_to(&mut read_buf) {
+                Ok(amt) if amt > 0 => {
+                    message.extend_from_slice(&read_buf[..amt]);
 
-                let _ = self
-                    .inner
-                    .serial_read_tx
-                    .send(SerialReadData::Data(read_buf[..amt].to_vec()));
-
-                if self.get_preserve_history() {
-                    let mut history = self.inner.history.lock().await;
-                    history.push_slice_overwrite(&read_buf[..amt]);
+                    if serial_reader.buffer().is_empty() {
+                        break;
+                    }
                 }
-            }
 
-            Err(e) if e.kind() != ErrorKind::WouldBlock => {
-                println!("Failed to read from serial port: {e:?}");
-                return Err(e.into());
-            }
+                Err(e) if e.kind() != ErrorKind::WouldBlock => {
+                    println!("Failed to read from serial port: {e:?}");
+                    return Err(e.into());
+                }
 
-            _ => (),
+                // having read 0 bytes means the device is exhausted of data
+                _ => return Ok(()),
+            }
         }
+
+        println!(
+            "Read {} bytes from {:?}",
+            message.len(),
+            serial_reader.get_ref().name()
+        );
+
+        if self.get_preserve_history() {
+            let mut history = self.inner.history.lock().await;
+            history.push_slice_overwrite(&message);
+        }
+
+        let _ = self
+            .inner
+            .serial_read_tx
+            .send(SerialReadData::Data(message));
 
         Ok(())
     }
 
     async fn process_write(&self, data: Option<Vec<u8>>) -> anyhow::Result<()> {
-        let Some(data) = data else {
-            return Err(anyhow!("Serial write channel closed"));
-        };
+        let data = data.ok_or(anyhow!("Serial write channel closed"))?;
 
         let mut serial_reader = self.inner.serial_reader.lock().await;
-        let Some(serial_reader) = serial_reader.as_mut() else {
-            return Err(anyhow!("Serial device not open"));
-        };
+        let serial_reader = serial_reader
+            .as_mut()
+            .ok_or(anyhow!("Serial device not open"))?;
 
         serial_reader.get_mut().write_all(&data)?;
         Ok(())
@@ -326,12 +358,10 @@ fn serial_reader_thread(mut poll: Poll, event_tx: broadcast::Sender<SerialReadEv
 
         for event in events.iter() {
             // println!("{event:?}");
-
-            if !event.is_error() {
-                let _ = event_tx.send(SerialReadEvent::Ready(event.token()));
-            } else {
-                let _ = event_tx.send(SerialReadEvent::Error(event.token()));
-            }
+            let _ = event_tx.send(SerialReadEvent {
+                token: event.token(),
+                is_error: event.is_error(),
+            });
         }
     }
 }

@@ -1,5 +1,13 @@
 {% extends "index.html" %}
 {% block device %}
-{% let is_popout = false %}
-{% include "device_view.html" %}
+<div class="col-xl pt-3 pb-3 d-flex flex-column">
+    {% include "terminal.html" %}
+</div>
+
+<div class="col-xl pt-xl-3" style="max-width: 357px">
+    {% let is_popout = false %}
+    {% include "terminal_settings.html" %}
+</div>
+
+{% include "terminal_scripts.html" %}
 {% endblock %}

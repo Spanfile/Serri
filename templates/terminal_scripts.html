@@ -1,0 +1,11 @@
+<script>
+  const alertPlaceholder = document.getElementById('wsAlertPlaceholder')
+  const appendWsAlert = (message) => {
+    const alert = document.createElement('div')
+    alert.innerHTML = `{% include "alert.html" %}`
+
+    alertPlaceholder.append(alert)
+  }
+</script>
+<script src="/dist/device.js"></script>
+<link href="/dist/device.css" rel="stylesheet">
