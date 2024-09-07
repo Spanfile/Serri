@@ -25,14 +25,14 @@ pub struct IndexTemplate {
 }
 
 #[derive(Template)]
-#[template(path = "device.html")]
+#[template(path = "device/device.html")]
 pub struct DeviceTemplate {
     pub index_template: IndexTemplate,
     pub preserve_history: bool,
 }
 
 #[derive(Template)]
-#[template(path = "device_popout.html")]
+#[template(path = "device/device_popout.html")]
 pub struct DevicePopoutTemplate(pub DeviceTemplate);
 
 #[derive(Template)]

@@ -1,5 +1,5 @@
 listen = "0.0.0.0:8080"
-banner = "Connected to {device} at {baud_rate}:{short_params}"
+banner = "Connected to {device} at {baud_rate}:{short_params}\r\n"
 
 [[serial_port]]
 device = "/dev/ttyUSB0:115200"

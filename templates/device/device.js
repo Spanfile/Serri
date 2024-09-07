@@ -4,6 +4,8 @@ import {FitAddon} from "@xterm/addon-fit/src/FitAddon";
 
 import "@xterm/xterm/css/xterm.css"
 
+const terminalElement = document.getElementById("terminal")
+
 const checkAutoResize = document.getElementById("checkAutoResize")
 const terminalSizeFields = document.getElementById("terminalSizeFields")
 const numTerminalColumns = document.getElementById("numTerminalColumns")
@@ -72,7 +74,6 @@ ws.onclose = (ev) => {
   }
 }
 
-const terminalElement = document.getElementById("terminal")
 term.open(terminalElement)
 term.loadAddon(fitAddon)
 
@@ -132,6 +133,11 @@ document.getElementById("checkPreserveHistory").oninput = async (ev) => {
 const btnPopout = document.getElementById("btnPopout")
 if (btnPopout != null) {
   btnPopout.onclick = (ev) => {
+    term.dispose()
+    ws.close(1000, "popped out")
+
+    terminalElement.innerText = "Terminal popped out into separate window. Refresh this page to reopen here."
+
     window.open(window.location.pathname + "?p=true", "Serri", "menubar=no,toolbar=no,location=no")
   }
 }

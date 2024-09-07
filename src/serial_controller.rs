@@ -334,7 +334,7 @@ impl SerialController {
             }
         }
 
-        debug!(len = message.len(), "read");
+        trace!(len = message.len(), "complete message");
 
         if self.get_preserve_history() {
             let mut history = self.inner.history.lock().expect("history mutex poisoned");

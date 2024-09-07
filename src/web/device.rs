@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
 use tinytemplate::TinyTemplate;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, error_span, info, trace, warn, Instrument};
+use tracing::{debug, error, error_span, info, warn, Instrument};
 
 use crate::{
     config::SerriConfig,
@@ -26,6 +26,13 @@ use crate::{
 };
 
 const BANNER_TEMPLATE_NAME: &str = "banner";
+
+#[derive(Debug, Copy, Clone)]
+enum WsTermination {
+    Ok,
+    Normal,
+    GoingAway,
+}
 
 #[derive(Debug, Clone)]
 struct ActiveConnectionsState {
@@ -182,6 +189,7 @@ async fn get_device_ws(
                 {
                     error!("Couldn't open serial device: {e:?}");
 
+                    // drop the span early to not hold it over the await point
                     drop(_enter);
                     let _ = socket
                         .send(Message::Close(Some(CloseFrame {
@@ -231,9 +239,23 @@ async fn handle_device_ws(
         // println!("Main loop");
         tokio::select! {
             ws_msg = socket.recv() => {
-                if let Err(e) = process_ws_message(ws_msg, &mut serial_write_tx).await {
-                    warn!("WebSocket terminated: {e:?}");
-                    break;
+                match process_ws_message(ws_msg, &mut serial_write_tx).await {
+                    Ok(WsTermination::Normal | WsTermination::GoingAway) => {
+                        let _ = socket.send(Message::Close(Some(CloseFrame {
+                            code: close_code::NORMAL,
+                            reason: "closing".into(),
+                        })))
+                        .await;
+
+                        break;
+                    },
+
+                    Err(e) => {
+                        warn!("WebSocket terminated: {e:?}");
+                        break;
+                    }
+
+                    _ => (),
                 }
             },
 
@@ -246,8 +268,7 @@ async fn handle_device_ws(
         }
     }
 
-    info!("Closing WebSocket");
-    let _ = socket.close().await;
+    debug!("WebSocket handler returning");
 }
 
 async fn send_banner(
@@ -328,26 +349,49 @@ fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Resul
 async fn process_ws_message(
     ws_msg: Option<Result<Message, axum::Error>>,
     serial_write_tx: &mut mpsc::Sender<Vec<u8>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<WsTermination> {
     let Some(Ok(msg)) = ws_msg else {
         warn!("WebSocket client disconnected");
         return Err(anyhow!("WebSocket client disconnected"));
     };
 
-    trace!(?msg);
+    debug!(?msg);
 
     match msg {
         Message::Text(text) => serial_write_tx.send(text.as_bytes().to_vec()).await?,
-        Message::Close(None) => return Err(anyhow!("WebSocket connection closed unexpectedly")),
+
+        Message::Close(Some(close_frame)) if close_frame.code == close_code::NORMAL => {
+            info!(?close_frame, "WebSocket client closed connection");
+            return Ok(WsTermination::Normal);
+        }
+
+        Message::Close(Some(close_frame)) if close_frame.code == close_code::AWAY => {
+            info!(?close_frame, "WebSocket client going away");
+            return Ok(WsTermination::GoingAway);
+        }
+
         Message::Close(Some(close_frame)) => {
-            debug!(?close_frame, "WebSocket client closed connection");
-            return Err(anyhow!("WebSocket client closed connection"));
+            debug!(
+                ?close_frame,
+                "WebSocket client closed connection unexpectedly"
+            );
+
+            return Err(anyhow!(
+                "WebSocket client closed connection unexpectedly. code={} reason=\"{}\"",
+                close_frame.code,
+                close_frame.reason
+            ));
+        }
+
+        Message::Close(None) => {
+            debug!("WebSocket client closed connection without close frame");
+            return Err(anyhow!("WebSocket connection closed unexpectedly"));
         }
 
         _ => debug!(?msg, "Unhandled WebSocket message"),
     }
 
-    Ok(())
+    Ok(WsTermination::Ok)
 }
 
 async fn process_serial_read(
@@ -355,7 +399,7 @@ async fn process_serial_read(
     socket: &mut WebSocket,
 ) -> anyhow::Result<()> {
     let serial_read = serial_read?;
-    trace!(?serial_read);
+    debug!(?serial_read);
 
     match serial_read {
         SerialReadData::Data(data) => socket.send(data.into()).await?,

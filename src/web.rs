@@ -1,11 +1,17 @@
 mod device;
 mod template;
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
-use axum::{http::StatusCode, response::IntoResponse, routing, Extension, Router};
+use axum::{
+    body::Body,
+    extract::ConnectInfo,
+    http::{Request, StatusCode},
+    response::IntoResponse,
+    routing, Extension, Router,
+};
 use tower_http::{services::ServeDir, trace::TraceLayer};
-use tracing::info;
+use tracing::{debug_span, info};
 
 use crate::{
     config::SerriConfig,
@@ -26,14 +32,35 @@ pub async fn run(
         .fallback(not_found)
         .layer(Extension(Arc::clone(&serri_config)))
         .layer(Extension(Arc::new(controllers)))
-        .layer(TraceLayer::new_for_http());
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                let ConnectInfo(addr) = request
+                    .extensions()
+                    .get::<ConnectInfo<SocketAddr>>()
+                    .expect(
+                        "ConnectInfo missing (did you forget to call \
+                         app.into_make_service_with_connect_info()?)",
+                    );
+
+                debug_span!(
+                    "request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                    version = ?request.version(),
+                    %addr,
+                )
+            }),
+        );
 
     let listener = tokio::net::TcpListener::bind(serri_config.listen).await?;
-    info!("Serving web on {}", serri_config.listen);
+    info!(listen = %serri_config.listen, "Serving web");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(super::shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(super::shutdown_signal())
+    .await?;
 
     Ok(())
 }

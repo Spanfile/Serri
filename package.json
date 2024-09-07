@@ -1,7 +1,7 @@
 {
   "scripts": {
     "watch": "parcel watch --no-hmr",
-    "build": "parcel build templates/*.js"
+    "build": "parcel build 'templates/**/*.js'"
   },
   "dependencies": {
     "@popperjs/core": "^2.11.8",
