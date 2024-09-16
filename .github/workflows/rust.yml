@@ -9,25 +9,19 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-freebsd
           - aarch64-unknown-linux-gnu
-    
+          - x86_64-pc-windows-msvc
+
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install library dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: libudev-dev
-          version: 1.0
-      - name: Install Rust
-        run: rustup update stable
-      - name: Install cross-compilation tools
-        uses: taiki-e/setup-cross-toolchain-action@v1
+      - name: Build release binary
+        uses: houseabsolute/actions-rust-cross@v0
         with:
           target: ${{ matrix.target }}
-      - name: Build release binary
-        run: cargo build --release
+          args: "--locked --release"
+          strip: true
