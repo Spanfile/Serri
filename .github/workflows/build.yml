@@ -26,7 +26,7 @@ jobs:
           packages: libudev-dev
           version: 1.0
       - name: Cache Docker images
-        uses: ScribeMD/docker-cache@v0
+        uses: ScribeMD/docker-cache@0
         with:
           key: docker-${{ runner.os }}-${{ matrix.target }}
       - name: Build release binary
