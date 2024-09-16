@@ -23,7 +23,7 @@ tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 mio = { version = "1.0.2", features = ["os-ext", "os-poll"] }
-mio-serial = { path = "../mio-serial" }
+mio-serial = { git = "https://github.com/Spanfile/mio-serial.git" }
 
 [workspace.metadata.cross.target.aarch64-unknown-linux-gnu]
 pre-build = [

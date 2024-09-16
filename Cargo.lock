@@ -718,6 +718,7 @@ dependencies = [
 [[package]]
 name = "mio-serial"
 version = "5.0.5"
+source = "git+https://github.com/Spanfile/mio-serial.git#27f8d4770906704654f650f836acf4a74b195c34"
 dependencies = [
  "log",
  "mio",
