@@ -11,16 +11,17 @@ jobs:
   backend:
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
-          - x86_64-pc-windows-gnu
+        build:
+          - target: x86_64-unknown-linux-gnu
+            bin: target/release/serri
+          - target: aarch64-unknown-linux-gnu
+            bin: target/aarch64-unknown-linux-gnu/release/serri
 
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install additional libraries
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ matrix.build.target == 'x86_64-unknown-linux-gnu' }}
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libudev-dev
@@ -28,13 +29,18 @@ jobs:
       - name: Cache Docker images
         uses: ScribeMD/docker-cache@0.5.0
         with:
-          key: docker-${{ runner.os }}-${{ matrix.target }}
+          key: docker-${{ runner.os }}-${{ matrix.build.target }}
       - name: Build release binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
-          target: ${{ matrix.target }}
+          target: ${{ matrix.build.target }}
           args: "--locked --release"
           toolchain: nightly
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.build.target }}
+          path: ${{ matrix.build.bin }}
 
   frontend:
     runs-on: ubuntu-latest
@@ -52,3 +58,8 @@ jobs:
           key: parcel-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
