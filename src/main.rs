@@ -1,5 +1,9 @@
 #![feature(let_chains)]
 
+mod build {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
 use std::fs::read_to_string;
 
 use futures::future::join_all;

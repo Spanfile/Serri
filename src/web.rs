@@ -16,7 +16,7 @@ use tracing::{debug_span, info};
 use crate::{
     config::SerriConfig,
     serial_controller::SerialController,
-    web::template::{BaseTemplate, ConfigTemplate, IndexTemplate, NotFoundTemplate},
+    web::template::{AboutTemplate, BaseTemplate, IndexTemplate, NotFoundTemplate},
 };
 
 pub async fn run(
@@ -26,7 +26,7 @@ pub async fn run(
     let serri_config = Arc::new(serri_config);
     let app = Router::new()
         .route("/", routing::get(root))
-        .route("/config", routing::get(config))
+        .route("/about", routing::get(about))
         .nest("/device", device::router())
         .nest_service("/dist", ServeDir::new("dist"))
         .fallback(not_found)
@@ -87,11 +87,11 @@ async fn root(Extension(serri_config): Extension<Arc<SerriConfig>>) -> IndexTemp
     }
 }
 
-async fn config(Extension(serri_config): Extension<Arc<SerriConfig>>) -> ConfigTemplate {
-    ConfigTemplate {
+async fn about(Extension(serri_config): Extension<Arc<SerriConfig>>) -> AboutTemplate {
+    AboutTemplate {
         base_template: BaseTemplate {
             serri_config,
-            active_path: "/config",
+            active_path: "/about",
         },
     }
 }

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="p-3">
+    <h3>Version information</h3>
+    <table class="table">
+        <tbody>
+        <tr>
+            <th scope="row" class="text-nowrap">Version</th>
+            <td>{{ crate::build::PKG_VERSION }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">Build profile</th>
+            <td>{{ crate::build::PROFILE }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">Git commit</th>
+            <td>{{ crate::build::GIT_COMMIT_HASH.unwrap_or("none") }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">Build time</th>
+            <td>{{ crate::build::BUILT_TIME_UTC }}</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h3>Build information</h3>
+    <table class="table">
+        <tbody>
+        <tr>
+            <th scope="row" class="text-nowrap">Build target</th>
+            <td>{{ crate::build::TARGET }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">Host target</th>
+            <td>{{ crate::build::HOST }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">Rust compiler version</th>
+            <td>{{ crate::build::RUSTC_VERSION }}</td>
+        </tr>
+        <tr>
+            <th scope="row" class="text-nowrap">CI platform</th>
+            <td>{{ crate::build::CI_PLATFORM.unwrap_or("none") }}</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -24,3 +24,6 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 mio = { version = "1.0.2", features = ["os-ext", "os-poll"] }
 mio-serial = { git = "https://github.com/Spanfile/mio-serial.git" }
+
+[build-dependencies]
+built = { version = "0.7.4", features = ["git2", "chrono"] }
