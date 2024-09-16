@@ -24,3 +24,9 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 mio = { version = "1.0.2", features = ["os-ext", "os-poll"] }
 mio-serial = { git = "https://github.com/Spanfile/mio-serial.git" }
+
+[workspace.metadata.cross.build]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get --assume-yes install libudev-dev:$CROSS_DEB_ARCH"
+]
