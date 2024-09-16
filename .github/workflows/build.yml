@@ -11,17 +11,15 @@ jobs:
   backend:
     strategy:
       matrix:
-        build:
-          - target: x86_64-unknown-linux-gnu
-            bin: target/release/serri
-          - target: aarch64-unknown-linux-gnu
-            bin: target/aarch64-unknown-linux-gnu/release/serri
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
 
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install additional libraries
-        if: ${{ matrix.build.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libudev-dev
@@ -29,18 +27,18 @@ jobs:
       - name: Cache Docker images
         uses: ScribeMD/docker-cache@0.5.0
         with:
-          key: docker-${{ runner.os }}-${{ matrix.build.target }}
+          key: docker-${{ runner.os }}-${{ matrix.target }}
       - name: Build release binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
-          target: ${{ matrix.build.target }}
+          target: ${{ matrix.target }}
           args: "--locked --release"
           toolchain: nightly
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bin-${{ matrix.build.target }}
-          path: ${{ matrix.build.bin }}
+          name: bin-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/serri
 
   frontend:
     runs-on: ubuntu-latest
