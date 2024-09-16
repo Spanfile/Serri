@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use askama_axum::{IntoResponse, Response};
@@ -16,7 +16,10 @@ use mio::Token;
 use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
 use tinytemplate::TinyTemplate;
-use tokio::sync::{broadcast, mpsc};
+use tokio::{
+    sync::{broadcast, mpsc},
+    time::Instant,
+};
 use tracing::{debug, error, error_span, info, warn, Instrument};
 
 use crate::{
@@ -26,12 +29,15 @@ use crate::{
 };
 
 const BANNER_TEMPLATE_NAME: &str = "banner";
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_MISSED_PINGS: usize = 5;
 
 #[derive(Debug, Copy, Clone)]
-enum WsTermination {
+enum WsEvent {
     Ok,
-    Normal,
-    GoingAway,
+    Ping,
+    CloseNormal,
+    CloseGoingAway,
 }
 
 #[derive(Debug, Clone)]
@@ -233,14 +239,17 @@ async fn handle_device_ws(
     mut serial_read_rx: broadcast::Receiver<SerialReadData>,
     mut serial_write_tx: mpsc::Sender<Vec<u8>>,
 ) {
-    // TODO: websocket pings?
+    let mut ping_interval = tokio::time::interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    let mut missed_pings: usize = 0;
 
     loop {
         // println!("Main loop");
         tokio::select! {
             ws_msg = socket.recv() => {
                 match process_ws_message(ws_msg, &mut serial_write_tx).await {
-                    Ok(WsTermination::Normal | WsTermination::GoingAway) => {
+                    Ok(WsEvent::Ping) => missed_pings = 0,
+
+                    Ok(WsEvent::CloseNormal | WsEvent::CloseGoingAway) => {
                         let _ = socket.send(Message::Close(Some(CloseFrame {
                             code: close_code::NORMAL,
                             reason: "closing".into(),
@@ -257,7 +266,19 @@ async fn handle_device_ws(
 
                     _ => (),
                 }
-            },
+            }
+
+            _ = ping_interval.tick() => {
+                debug!(missed_pings, "ping");
+                missed_pings += 1;
+
+                if missed_pings > MAX_MISSED_PINGS {
+                    warn!(missed_pings, "Too many missed pings, closing connection");
+                    break;
+                }
+
+                let _ = socket.send(Message::Ping("ping".as_bytes().to_vec())).await;
+            }
 
             serial_read = serial_read_rx.recv() => {
                 if let Err(e) = process_serial_read(serial_read, &mut socket).await {
@@ -349,7 +370,7 @@ fn render_banner_template(banner: &str, context: BannerContext) -> anyhow::Resul
 async fn process_ws_message(
     ws_msg: Option<Result<Message, axum::Error>>,
     serial_write_tx: &mut mpsc::Sender<Vec<u8>>,
-) -> anyhow::Result<WsTermination> {
+) -> anyhow::Result<WsEvent> {
     let Some(Ok(msg)) = ws_msg else {
         warn!("WebSocket client disconnected");
         return Err(anyhow!("WebSocket client disconnected"));
@@ -359,15 +380,16 @@ async fn process_ws_message(
 
     match msg {
         Message::Text(text) => serial_write_tx.send(text.as_bytes().to_vec()).await?,
+        Message::Ping(_) | Message::Pong(_) => return Ok(WsEvent::Ping),
 
         Message::Close(Some(close_frame)) if close_frame.code == close_code::NORMAL => {
             info!(?close_frame, "WebSocket client closed connection");
-            return Ok(WsTermination::Normal);
+            return Ok(WsEvent::CloseNormal);
         }
 
         Message::Close(Some(close_frame)) if close_frame.code == close_code::AWAY => {
             info!(?close_frame, "WebSocket client going away");
-            return Ok(WsTermination::GoingAway);
+            return Ok(WsEvent::CloseGoingAway);
         }
 
         Message::Close(Some(close_frame)) => {
@@ -391,7 +413,7 @@ async fn process_ws_message(
         _ => debug!(?msg, "Unhandled WebSocket message"),
     }
 
-    Ok(WsTermination::Ok)
+    Ok(WsEvent::Ok)
 }
 
 async fn process_serial_read(

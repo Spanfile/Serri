@@ -398,7 +398,10 @@ pub fn create_serial_reader() -> (
 
     let (event_tx, _) = broadcast::channel(32);
     let event_tx_clone = event_tx.clone();
-    let handle = std::thread::spawn(|| serial_reader_thread(poll, event_tx_clone));
+    let handle = std::thread::Builder::new()
+        .name("serial reader".to_string())
+        .spawn(|| serial_reader_thread(poll, event_tx_clone))
+        .expect("failed to spawn serial reader thread");
 
     (handle, registry, event_tx)
 }

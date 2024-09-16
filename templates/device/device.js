@@ -7,12 +7,30 @@ import "@xterm/xterm/css/xterm.css"
 const terminalElement = document.getElementById("terminal")
 
 const checkAutoResize = document.getElementById("checkAutoResize")
+const checkLocalEcho = document.getElementById("checkLocalEcho")
 const terminalSizeFields = document.getElementById("terminalSizeFields")
 const numTerminalColumns = document.getElementById("numTerminalColumns")
 const numTerminalRows = document.getElementById("numTerminalRows")
 
 const term = new Terminal({
   fontFamily: "monospace"
+})
+
+term.onData((data) => {
+  if (checkLocalEcho.checked) {
+    switch (data) {
+      case "\u{7f}": // backspace
+        term.write("\b")
+        break
+
+      case "\r": // return
+        term.write("\r\n")
+        break
+
+      default:
+        term.write(data)
+    }
+  }
 })
 
 const fitAddon = new FitAddon()
@@ -89,7 +107,7 @@ document.getElementById("btnApplyTerminalSize").onclick = (ev) => {
 }
 
 checkAutoResize.oninput = (ev) => {
-  if (ev.target.checked) {
+  if (checkAutoResize.checked) {
     terminalElement.classList.add("flex-grow-1")
 
     resizeTerminalToFit()
@@ -138,6 +156,7 @@ if (btnPopout != null) {
 
     terminalElement.innerText = "Terminal popped out into separate window. Refresh this page to reopen here."
 
+    // TODO: include device in target to allow multiple popups at once
     window.open(window.location.pathname + "?p=true", "Serri", "menubar=no,toolbar=no,location=no")
   }
 }

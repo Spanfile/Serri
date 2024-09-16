@@ -1,45 +1,43 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container">
-    <div class="row gx-3">
-        <div class="col-xxl-2 d-flex flex-column align-items-stretch flex-shrink-0">
-            {% if !serri_config.serial_port.is_empty() %}
-            <div class="list-group list-group-flush border-bottom scrollarea">
-                {% for port in serri_config.serial_port %}
-                <a class="list-group-item list-group-item-action py-3 lh-sm
+<div class="row gx-3">
+    <div class="col-xxl-2 d-flex flex-column align-items-stretch flex-shrink-0">
+        {% if !serri_config.serial_port.is_empty() %}
+        <div class="list-group list-group-flush border-bottom scrollarea">
+            {% for port in serri_config.serial_port %}
+            <a class="list-group-item list-group-item-action py-3 lh-sm
                     {% if active_device_index == Some(loop.index0).copied() %}
                     active
                     {% endif %}"
-                   href="/device/{{ loop.index0 }}">
-                    <div class="d-flex w-100 align-items-center justify-content-between">
-                        <strong class="mb-1">
-                            {% if let Some(title) = port.title %}
-                            {{ title }}
-                            {% else %}
-                            {{ port.serial_device.device }}
-                            {% endif %}
-                        </strong>
-                    </div>
-                    {% if let Some(description) = port.description %}
-                    <div class="pb-1 small text-truncate overflow-auto">{{ description }}</div>
-                    {% else if port.title.is_some() %}
-                    <div class="pb-1 small text-truncate overflow-auto">
+               href="/device/{{ loop.index0 }}">
+                <div class="d-flex w-100 align-items-center justify-content-between">
+                    <strong class="mb-1">
+                        {% if let Some(title) = port.title %}
+                        {{ title }}
+                        {% else %}
                         {{ port.serial_device.device }}
-                    </div>
-                    {% endif %}
-                </a>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="mt-3 ms-3">No serial devices configured.</p>
-            {% endif %}
+                        {% endif %}
+                    </strong>
+                </div>
+                {% if let Some(description) = port.description %}
+                <div class="pb-1 small text-truncate overflow-auto">{{ description }}</div>
+                {% else if port.title.is_some() %}
+                <div class="pb-1 small text-truncate overflow-auto">
+                    {{ port.serial_device.device }}
+                </div>
+                {% endif %}
+            </a>
+            {% endfor %}
         </div>
-
-        {% block device %}
-        <div class="col">
-            <p class="mt-3">Select a device from the list.</p>
-        </div>
-        {% endblock %}
+        {% else %}
+        <p class="mt-3 ms-3">No serial devices configured.</p>
+        {% endif %}
     </div>
+
+    {% block device %}
+    <div class="col">
+        <p class="mt-3">Select a device from the list.</p>
+    </div>
+    {% endblock %}
 </div>
 {% endblock %}

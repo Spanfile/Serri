@@ -32,14 +32,7 @@ impl<B: BufRead> ReadUpTo for B {
             let remaining = buf.len() - total; // how much space is left in the buffer
             let copy = read_len.min(remaining); // how much should be copied (and consumed)
 
-            trace!(
-                read_len,
-                total,
-                remaining,
-                copy,
-                ?read,
-                "read serial device"
-            );
+            trace!(read_len, total, remaining, copy, ?read, "read buffer");
 
             buf[total..total + copy].copy_from_slice(&read[..copy]);
             self.consume(copy);
