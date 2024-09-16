@@ -4,7 +4,6 @@ use std::fs::read_to_string;
 
 use futures::future::join_all;
 use mio::Token;
-use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -74,12 +73,16 @@ async fn shutdown_signal() {
             .expect("failed to install Ctrl-C handler")
     };
 
+    #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
             .await
     };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
     tokio::select! {
         _ = ctrl_c => {},

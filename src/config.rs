@@ -78,6 +78,7 @@ pub enum SerialDeviceParseError {
 
 impl SerialDevice {
     pub fn open(&self) -> anyhow::Result<SerialStream> {
+        #[cfg_attr(not(unix), expect(unused_mut))]
         let mut port = serialport::new(&self.device, self.baud_rate)
             .data_bits(self.serial_params.data_bits)
             .parity(self.serial_params.parity)
@@ -88,6 +89,7 @@ impl SerialDevice {
         // port.set_timeout(Duration::from_millis(10))
         //     .expect("failed to set serial port timeout");
 
+        #[cfg(unix)]
         port.set_exclusive(true)
             .expect("failed to set serial port exclusive");
 
