@@ -30,4 +30,4 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: "--locked --release"
-          strip: true
+          toolchain: nightly
