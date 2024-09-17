@@ -18,22 +18,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Install additional libraries
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libudev-dev
           version: 1.0
+          
+      - name: Set up Docker Buildx
+        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+        uses: docker/setup-buildx-action@v3
+        
       - name: Cache Docker images
+        if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
         uses: ScribeMD/docker-cache@0.5.0
         with:
           key: docker-${{ runner.os }}-${{ matrix.target }}
+          
       - name: Build release binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
           target: ${{ matrix.target }}
           args: "--locked --release"
           toolchain: nightly
+          
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -44,18 +53,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
+          
       - name: Parcel cache
         uses: actions/cache@v4
         with:
           path: .parcel-cache
           key: parcel-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - run: npm ci
-      - run: npm run build
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build frontend dist
+        run: npm run build
+      
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
