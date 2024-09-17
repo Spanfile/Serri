@@ -1,0 +1,52 @@
+# required: listen address and port. serri doesn't have any TLS or authentication mechanisms, please
+# consider running it behind a reverse proxy to secure it
+listen = "127.0.0.1:8080"
+
+# optional: banner to show in the terminal after succesfully connecting
+# several format options are available:
+# {device} - configured path to serial device
+# {short_params} - short serial parameter string that contains data bits, parity and stop bits (i.e. 8N1)
+# {baud_rate} - configured baud rate
+# {data_bits} - configured data bits
+# {parity} - configured parity
+# {stop_bits} - configured stop bits
+# {flow_control} - configured flow control
+# note that to print a newline to the serial console, you have to include a carriage return as well
+banner = "Connected to {device} at {baud_rate}:{short_params}\r\n"
+
+# optional: preserve history and history size
+preserve_history = true # serri by default will preserve serial read history
+default_history_size = 100000 # serri by default will preserve 100 kilobytes of history
+
+# required: one or more serial ports
+# below are examples of different ways to configure each port
+
+[[serial_port]]
+device = "/dev/ttyUSB0:115200" # device path and baud rate, 8N1 is assumed if omitted
+
+[[serial_port]]
+title = "9600 baud" # assign a friendly name for this port
+device = "/dev/ttyUSB0:9600"
+
+[[serial_port]]
+title = "300 baud"
+description = "Serial like its a Bell 103"
+device = "/dev/ttyUSB0:300:8N1"
+
+[[serial_port]]
+title = "Long device path"
+device = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.2.1:1.0-port0"
+# serial parameters can also be individually configured
+baud_rate = 115200
+data_bits = 8
+parity = "None"
+stop_bits = 1
+flow_control = "hw" # serri currently does not implement any kind of flow control mechanism
+
+[[serial_port]]
+device = "/dev/ttyUSB0:115200"
+history_size = 400000 # override history size for this port
+
+[[serial_port]]
+device = "/dev/ttyUSB0:115200"
+preserve_history = false # don't preserve history for this port
