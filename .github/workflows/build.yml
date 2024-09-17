@@ -6,6 +6,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CROSS_BUILD_OPTS: --cache-from type=gha --cache-to type=gha,mode=max
 
 jobs:
   backend:
