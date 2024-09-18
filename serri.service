@@ -1,0 +1,11 @@
+[Unit]
+Description=Serri serial console server
+After=network.target
+
+[Service]
+Environment=RUST_LOG=serri=debug
+WorkingDirectory=/opt/serri
+ExecStart=/opt/serri/serri
+
+[Install]
+WantedBy=default.target
