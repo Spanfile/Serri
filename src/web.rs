@@ -19,6 +19,9 @@ use crate::{
     web::template::{AboutTemplate, BaseTemplate, IndexTemplate, NotFoundTemplate},
 };
 
+const DIST_PATH: Option<&str> = option_env!("SERRI_DIST_PATH");
+const DEFAULT_DIST_PATH: &str = "dist";
+
 pub async fn run(
     serri_config: SerriConfig,
     controllers: Vec<SerialController>,
@@ -28,7 +31,10 @@ pub async fn run(
         .route("/", routing::get(root))
         .route("/about", routing::get(about))
         .nest("/device", device::router())
-        .nest_service("/dist", ServeDir::new("dist"))
+        .nest_service(
+            "/dist",
+            ServeDir::new(DIST_PATH.unwrap_or(DEFAULT_DIST_PATH)),
+        )
         .fallback(not_found)
         .layer(Extension(Arc::clone(&serri_config)))
         .layer(Extension(Arc::new(controllers)))

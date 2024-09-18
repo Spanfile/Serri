@@ -20,6 +20,9 @@ mod serial_controller;
 mod util;
 mod web;
 
+const CONFIG_PATH: Option<&str> = option_env!("SERRI_CONFIG_PATH");
+const DEFAULT_CONFIG_PATH: &str = "serri.toml";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -35,10 +38,12 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
+    let config_path = CONFIG_PATH.unwrap_or(DEFAULT_CONFIG_PATH);
     let serri_config: SerriConfig = toml::from_str(
-        &read_to_string("serri.toml").context("Failed to read config file 'serri.toml'")?,
+        &read_to_string(config_path)
+            .with_context(|| format!("Failed to read config file '{config_path}'"))?,
     )
-    .context("Failed to parse config file 'serri.toml'")?;
+    .with_context(|| format!("Failed to parse config file '{config_path}'"))?;
 
     debug!("{serri_config:#?}");
 

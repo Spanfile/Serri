@@ -37,13 +37,21 @@ no way of testing if it actually runs on Windows, or if it can be natively built
 4. Build the backend application: `cargo build --release`
 
 Frontend bundles are placed in `dist/`. The application executable is placed in
-`target/release/serri`. If running the application somewhere else, `dist/` should be kept next to
-the executable.
+`target/release/serri`.
+
+Some build-time configuration options are available through environment variables (e.g.
+`VARIABLE=... cargo build --release`):
+
+- `SERRI_DIST_PATH`: path where Serri will serve the frontend bundles from (path to `dist/`).
+  Default: `dist` in its current working directory.
+- `SERRI_CONFIG_PATH`: path where Serri will look for the config file. Default: `serri.toml` in its
+  current working directory.
 
 ## Configuration
 
 Sample configuration file can be found in [serri.sample.toml](serri.sample.toml). It should be
-copied and renamed to `serri.toml` and kept next to the executable.
+copied and renamed to `serri.toml`. By default Serri will look for it in its current working
+directory.
 
 ## Some things to note
 
