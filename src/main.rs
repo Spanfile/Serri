@@ -6,6 +6,7 @@ mod build {
 
 use std::fs::read_to_string;
 
+use anyhow::Context;
 use futures::future::join_all;
 use mio::Token;
 use tokio_util::sync::CancellationToken;
@@ -34,8 +35,11 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
-    // TODO: better error message if config file is missing or fails to read etc.
-    let serri_config: SerriConfig = toml::from_str(&read_to_string("serri.toml")?)?;
+    let serri_config: SerriConfig = toml::from_str(
+        &read_to_string("serri.toml").context("Failed to read config file 'serri.toml'")?,
+    )
+    .context("Failed to parse config file 'serri.toml'")?;
+
     debug!("{serri_config:#?}");
 
     let (_serial_reader_handle, registry, event_tx) = serial_controller::create_serial_reader();
