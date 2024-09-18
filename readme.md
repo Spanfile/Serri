@@ -1,5 +1,7 @@
 # Serri
 
+[![Build](https://github.com/Spanfile/Serri/actions/workflows/build.yml/badge.svg)](https://github.com/Spanfile/Serri/actions/workflows/build.yml)
+
 (WIP name, it's terrible)
 
 Serri is a serial console server application for exposing physical serial ports through a web
