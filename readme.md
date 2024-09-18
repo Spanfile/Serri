@@ -2,10 +2,18 @@
 
 (WIP name, it's terrible)
 
-Serri is a serial console server application for exposing onboard serial ports through a web
+Serri is a serial console server application for exposing physical serial ports through a web
 interface.
 
 ## Building
+
+There is a pipeline in Github Actions that builds the application and outputs it as artifacts:
+
+- `bin-[target]` - Application binary for a certain platform and architecture. Currently these are
+  Linux x86_64 and aarch64, which are the two platforms I use Serri on
+- `dist` - Frontend bundles
+
+Note that build artifacts are retained for only 90 days and I haven't yet made a release pipeline.
 
 ### Requirements
 
@@ -13,7 +21,8 @@ interface.
 - Node.js, version 20
     - At the time of writing (2024-09-17), there is
       a [bug in the Parcel bundler](https://github.com/parcel-bundler/parcel/issues/9926) that
-      prevents it from running on Node.js 22 or newer
+      prevents it from running on Node.js 22 or newer. Try `nvm` if you need an older version of
+      Node.js.
 - On Linux: `libudev` development files. On Ubuntu this is `libudev-dev`, your distro may vary.
 
 You'll likely need a Linux environment to both build and run the application in. I have previously
@@ -27,7 +36,7 @@ no way of testing if it actually runs on Windows, or if it can be natively built
 3. Build the frontend bundle: `npm run build`
 4. Build the backend application: `cargo build --release`
 
-Bundled frontend files are placed in `dist/`. The application executable is placed in
+Frontend bundles are placed in `dist/`. The application executable is placed in
 `target/release/serri`. If running the application somewhere else, `dist/` should be kept next to
 the executable.
 

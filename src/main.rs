@@ -34,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().without_time())
         .init();
 
+    // TODO: better error message if config file is missing or fails to read etc.
     let serri_config: SerriConfig = toml::from_str(&read_to_string("serri.toml")?)?;
     debug!("{serri_config:#?}");
 
