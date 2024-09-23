@@ -1,13 +1,11 @@
 name: Build
 
-on:
-  push:
-    branches: [ "main" ]
+on: push
 
 env:
   CARGO_TERM_COLOR: always
-  # CROSS_BUILD_OPTS: --cache-from type=gha --cache-to type=gha,mode=max
-  # CROSS_DEBUG: "1"
+#  CROSS_BUILD_OPTS: --cache-from type=gha --cache-to type=gha,mode=max
+#  CROSS_DEBUG: "1"
 
 jobs:
   backend:
@@ -20,31 +18,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install additional libraries
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: awalsh128/cache-apt-pkgs-action@latest
+
+      #      - name: Install additional libraries
+      #        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+      #        uses: awalsh128/cache-apt-pkgs-action@latest
+      #        with:
+      #          packages: libudev-dev
+      #          version: 1.0
+      #
+
+      #      - name: Set up Docker Buildx
+      #        uses: docker/setup-buildx-action@v3
+      #
+      #      - name: Cache Docker images
+      #        uses: ScribeMD/docker-cache@0.5.0
+      #        with:
+      #          key: docker-${{ runner.os }}-${{ matrix.target }}
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@master
         with:
-          packages: libudev-dev
-          version: 1.0
-          
-      # - name: Set up Docker Buildx
-      #  if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
-      #  uses: docker/setup-buildx-action@v3
-        
-      # - name: Cache Docker images
-      #   if: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
-      #   uses: ScribeMD/docker-cache@0.5.0
-      #   with:
-      #     key: docker-${{ runner.os }}-${{ matrix.target }}
-          
-      - name: Build release binary
-        uses: houseabsolute/actions-rust-cross@v0
+          toolchain: nightly-2024-09-22
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust project
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
         with:
-          target: ${{ matrix.target }}
-          args: "--locked --release"
-          toolchain: nightly
-          
+          tool: cross
+
+      - name: Cross-compile release binary
+        run: "cross build --target ${{ matrix.target }} --locked --release"
+
+      #      - name: Build release binary
+      #        uses: houseabsolute/actions-rust-cross@v0
+      #        with:
+      #          target: ${{ matrix.target }}
+      #          args: "--locked --release"
+      #          toolchain: nightly
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -55,25 +69,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-          
+
       - name: Parcel cache
         uses: actions/cache@v4
         with:
           path: .parcel-cache
           key: parcel-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          
+
       - name: Install dependencies
         run: npm ci
-        
+
       - name: Build frontend dist
         run: npm run build
-      
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
