@@ -1,6 +1,6 @@
 [package]
 name = "serri"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -12,7 +12,9 @@ dashmap = "6.0.1"
 futures = "0.3.30"
 ringbuf = "0.4.4"
 serde = { version = "1.0.207", features = ["derive"] }
-serialport = { version = "4.5.0", features = ["serde"] }
+serialport = { version = "4.5.0", default-features = false, features = [
+    "serde",
+] }
 thiserror = "2.0.9"
 tinytemplate = "1.2.1"
 tokio = { version = "1.39.2", features = [
