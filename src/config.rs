@@ -233,7 +233,7 @@ where
 {
     struct DataBitsVisitor;
 
-    impl<'de> Visitor<'de> for DataBitsVisitor {
+    impl Visitor<'_> for DataBitsVisitor {
         type Value = DataBits;
 
         fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -260,7 +260,7 @@ where
 {
     struct ParityVisitor;
 
-    impl<'de> Visitor<'de> for ParityVisitor {
+    impl Visitor<'_> for ParityVisitor {
         type Value = Parity;
 
         fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -284,7 +284,7 @@ where
 {
     struct StopBitsVisitor;
 
-    impl<'de> Visitor<'de> for StopBitsVisitor {
+    impl Visitor<'_> for StopBitsVisitor {
         type Value = StopBits;
 
         fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -311,7 +311,7 @@ where
 {
     struct FlowControlVisitor;
 
-    impl<'de> Visitor<'de> for FlowControlVisitor {
+    impl Visitor<'_> for FlowControlVisitor {
         type Value = FlowControl;
 
         fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {

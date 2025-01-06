@@ -20,12 +20,11 @@ Note that build artifacts are retained for only 90 days and I haven't yet made a
 ### Requirements
 
 - Rust, nightly required
-- Node.js, version 20
-    - At the time of writing (2024-09-17), there is
-      a [bug in the Parcel bundler](https://github.com/parcel-bundler/parcel/issues/9926) that
-      prevents it from running on Node.js 22 or newer. Try `nvm` if you need an older version of
-      Node.js.
-- On Linux: `libudev` development files. On Ubuntu this is `libudev-dev`, your distro may vary.
+- Node.js, preferably latest LTS
+  - 2024-10-18: The bug has been fixed, Node.js 22 and 23 have been confirmed to work
+  - 2024-09-17: There is a [bug in the Parcel bundler](https://github.com/parcel-bundler/parcel/issues/9926) that
+    prevents it from running on Node.js 22 or newer. Try `nvm` if you need an older version of
+    Node.js.
 
 You'll likely need a Linux environment to both build and run the application in. I have previously
 tested that it does cross-compile for `x86_64-pc-windows-gnu` from a Linux environment, but I have
